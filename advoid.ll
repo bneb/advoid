@@ -1,4 +1,4 @@
-; mac-hole.ll
+; advoid.ll
 ; advoid.ll implements the zero-allocation packet interceptor.
 ; It binds to loopback port 53, intercepts raw UDP datagrams, extracts the QNAME,
 ; and invokes the external is_blocked hash function for real-time traffic filtering.
@@ -13,7 +13,7 @@ declare i32 @printf(ptr, ...)
 declare i32 @poll(ptr, i32, i32)
 declare i1 @is_blocked(i64)
 
-@msg = private unnamed_addr constant [29 x i8] c"LLVM Mac-Hole Active on :53\0A\00"
+@msg = private unnamed_addr constant [27 x i8] c"LLVM Advoid Active on :53\0A\00"
 @state_addrs = global [65536 x [16 x i8]] zeroinitializer
 
 define i32 @main() {
