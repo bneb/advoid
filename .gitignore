@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Build Artifacts
+Advoid.app/
+AppIcon.icns
+advoid-engine
+
+# Generated LLVM & Object Files
+blocklist.ll
+final.ll
+final.o
+final_tiny.ll
+final_tiny.o
+empty_blocklist.ll
+
+# Legacy Binaries
+mac-hole
+mac-hole-tiny
