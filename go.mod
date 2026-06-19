@@ -1,3 +1,3 @@
-module mac-hole-llvm
+module advoid-llvm
 
 go 1.25.5

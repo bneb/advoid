@@ -5,8 +5,9 @@ set -e
 echo "Uninstalling Advoid..."
 
 echo "1. Restoring default DNS settings..."
-networksetup -setdnsservers Wi-Fi empty 2>/dev/null || true
-networksetup -setdnsservers Ethernet empty 2>/dev/null || true
+networksetup -listallnetworkservices | grep -v '*' | tail -n +2 | while read -r service; do
+    sudo networksetup -setdnsservers "$service" empty
+done 2>/dev/null || true
 
 echo "2. Terminating UI application..."
 killall Advoid 2>/dev/null || true

@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install LLVM toolchain
+        run: brew install llvm
+
+      - name: Add LLVM to PATH
+        run: echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+
+      - name: Generate blocklist
+        run: go run compile_blocklist.go
+
+      - name: Link LLVM IR
+        run: llvm-link advoid.ll blocklist.ll -S -o final.ll
+
+      - name: Compile to object
+        run: llc -O0 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
+
+      - name: Link engine binary
+        run: clang final.o -o advoid-engine
+
+      - name: Assemble App bundle
+        run: |
+          APP_DIR="Advoid.app"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+
+          mv advoid-engine "$APP_DIR/Contents/MacOS/advoid-engine"
+          chmod +x "$APP_DIR/Contents/MacOS/advoid-engine"
+
+          swiftc advoid-menu.swift -o "$APP_DIR/Contents/MacOS/Advoid"
+
+          cat <<EOF > "$APP_DIR/Contents/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>Advoid</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.advoid.menu</string>
+              <key>CFBundleName</key>
+              <string>Advoid</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>LSUIElement</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          if [ -f "advoid.png" ]; then
+            cp advoid.png "$APP_DIR/Contents/Resources/advoid.png"
+          fi
+          if [ -f "AppIcon.icns" ]; then
+            cp AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
+          fi
+
+      - name: Package as ZIP
+        run: |
+          zip -r advoid.zip Advoid.app
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: advoid.zip
+          generate_release_notes: true
+          make_latest: true

@@ -2,8 +2,11 @@ import Cocoa
 
 /// AppDelegate manages the macOS Menu Bar lifecycle and zero-configuration installation.
 /// It verifies the presence of the LLVM daemon and registers it dynamically via launchctl.
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
+    var statsBlockedItem: NSMenuItem!
+    var statsForwardedItem: NSMenuItem!
+    var statsUptimeItem: NSMenuItem!
 
     // applicationDidFinishLaunching initializes the Menu Bar item and checks daemon status.
     func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -20,11 +23,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func setupMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
+        menu.delegate = self
         menu.addItem(NSMenuItem(title: "Enable Adblock", action: #selector(enable), keyEquivalent: "e"))
         menu.addItem(NSMenuItem(title: "Disable Adblock", action: #selector(disable), keyEquivalent: "d"))
         menu.addItem(NSMenuItem.separator())
+        statsBlockedItem = NSMenuItem(title: "Blocked: —", action: nil, keyEquivalent: "")
+        statsBlockedItem.isEnabled = false
+        menu.addItem(statsBlockedItem)
+        statsForwardedItem = NSMenuItem(title: "Forwarded: —", action: nil, keyEquivalent: "")
+        statsForwardedItem.isEnabled = false
+        menu.addItem(statsForwardedItem)
+        statsUptimeItem = NSMenuItem(title: "Uptime: —", action: nil, keyEquivalent: "")
+        statsUptimeItem.isEnabled = false
+        menu.addItem(statsUptimeItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
-        
+
         statusItem.menu = menu
     }
 
@@ -174,6 +188,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return output.contains("127.0.0.1")
         }
         return false
+    }
+
+    // menuWillOpen is called when the user clicks the menu bar icon.
+    // We refresh stats just before the menu appears.
+    func menuWillOpen(_ menu: NSMenu) {
+        refreshStats()
+    }
+
+    // refreshStats reads /tmp/advoid.stats and updates the menu items.
+    func refreshStats() {
+        let statsPath = "/tmp/advoid.stats"
+        guard let content = try? String(contentsOfFile: statsPath, encoding: .utf8) else { return }
+        let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        guard lines.count >= 3 else { return }
+
+        if let blocked = Int64(lines[0]) {
+            statsBlockedItem.title = "Blocked: \(formatCount(blocked))"
+        }
+        if let forwarded = Int64(lines[1]) {
+            statsForwardedItem.title = "Forwarded: \(formatCount(forwarded))"
+        }
+        if let uptime = Int64(lines[2]) {
+            statsUptimeItem.title = "Uptime: \(formatUptime(uptime))"
+        }
+    }
+
+    // formatCount formats a large integer with locale-aware grouping (e.g., 1,234,567).
+    func formatCount(_ count: Int64) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        return formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+    }
+
+    // formatUptime converts seconds to a human-readable duration.
+    func formatUptime(_ seconds: Int64) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        return "\(h)h \(m)m"
     }
 
     // applicationWillTerminate ensures DNS is restored if the app is force quit or OS shuts down.

@@ -1,15 +1,27 @@
 /*
-Package main implements the ahead-of-time (AOT) blocklist compiler for Advoid.
+Package main implements the ahead-of-time blocklist compiler for Advoid.
 
-It streams the StevenBlack hosts file, extracts target domains,
-and computes their 64-bit FNV-1a hashes precisely as they will appear
-in a DNS UDP packet. Finally, it emits an LLVM Intermediate Representation
-file (blocklist.ll) containing a single O(1) branch switch statement.
+It fetches the StevenBlack unified hosts file over HTTP, parses out target
+domains, computes their 64-bit FNV-1a hashes in DNS wire format (so they
+match what the engine sees in incoming UDP packets), and emits blocklist.ll —
+a single LLVM switch statement mapping hash → blocked/allowed.
+
+The switch-statement-as-hash-table thing is the idea I'm happiest with.
+Instead of loading a blocklist at runtime and building a hash table, the
+Go compiler does all the work at build time and LLVM turns the switch into
+jump tables. The lookup is a single computed branch. The tradeoff is you
+have to recompile to update the blocklist, but the hot path has nothing
+to allocate, probe, or chase pointers through.
+
+The -local flag converts a text blocklist file (one domain per line) into
+a binary hashes file the engine reads at startup with open/read/close.
 */
 package main
 
 import (
 	"bufio"
+	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,7 +152,67 @@ func writeIRFooter(w *bufio.Writer) {
 	w.WriteString("  ]\n\nblock:\n  ret i1 1\n\nallow:\n  ret i1 0\n}\n")
 }
 
+// processLocalFile reads a text blocklist file (one domain per line),
+// computes wire-format FNV-1a hashes for each domain, and writes them
+// as a binary file suitable for runtime loading by the Advoid engine.
+func processLocalFile(inputPath, outputPath string) error {
+	in, err := os.Open(inputPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	var hashes []uint64
+	seen := make(map[uint64]struct{})
+	scanner := bufio.NewScanner(in)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		hash := hashWire(line)
+		if _, exists := seen[hash]; !exists {
+			seen[hash] = struct{}{}
+			hashes = append(hashes, hash)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Write count as little-endian u64, then each hash
+	if err := binary.Write(out, binary.LittleEndian, uint64(len(hashes))); err != nil {
+		return err
+	}
+	for _, h := range hashes {
+		if err := binary.Write(out, binary.LittleEndian, h); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("Wrote %d local domain hashes to %s\n", len(hashes), outputPath)
+	return nil
+}
+
 func main() {
+	localPath := flag.String("local", "", "Path to a local blocklist text file to convert to binary hashes")
+	localOutput := flag.String("output", "blocklist.local.hashes", "Output path for binary hashes (used with -local)")
+	flag.Parse()
+
+	// Local mode: convert text blocklist to binary hashes for runtime engine loading
+	if *localPath != "" {
+		if err := processLocalFile(*localPath, *localOutput); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	// Default mode: fetch StevenBlack list and generate blocklist.ll (AOT compilation)
 	body, err := fetchStream()
 	if err != nil {
 		panic(err)

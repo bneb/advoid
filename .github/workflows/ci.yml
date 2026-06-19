@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install LLVM toolchain
+        run: brew install llvm
+
+      - name: Add LLVM to PATH
+        run: echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+
+      - name: Run blocklist compiler tests
+        run: go test ./... -v
+
+      - name: Generate blocklist
+        run: go run compile_blocklist.go
+
+      - name: Link LLVM IR
+        run: llvm-link advoid.ll blocklist.ll -S -o final.ll
+
+      - name: Compile to object
+        run: llc -O0 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
+
+      - name: Link engine binary
+        run: clang final.o -o advoid-engine
+
+      - name: Verify engine binary exists
+        run: |
+          file advoid-engine
+          test -x advoid-engine
+
+      - name: Smoke test — blocked domain returns 0.0.0.0
+        run: |
+          sudo ./advoid-engine &
+          ENGINE_PID=$!
+          # Wait for the engine to bind its socket
+          sleep 2
+          # Query a known ad/telemetry domain; should be blocked
+          RESULT=$(dig +short @127.0.0.1 doubleclick.net A 2>/dev/null || true)
+          echo "dig result for doubleclick.net: $RESULT"
+          if echo "$RESULT" | grep -q "0\.0\.0\.0"; then
+            echo "PASS: blocked domain returned 0.0.0.0"
+          else
+            echo "FAIL: blocked domain did not return 0.0.0.0"
+            sudo kill $ENGINE_PID 2>/dev/null || true
+            exit 1
+          fi
+          sudo kill $ENGINE_PID 2>/dev/null || true
+
+      - name: Smoke test — allowed domain forwards correctly
+        run: |
+          sudo ./advoid-engine &
+          ENGINE_PID=$!
+          sleep 2
+          # Query a known safe domain; should resolve normally (not 0.0.0.0)
+          RESULT=$(dig +short @127.0.0.1 github.com A 2>/dev/null || true)
+          echo "dig result for github.com: $RESULT"
+          if echo "$RESULT" | grep -q "0\.0\.0\.0"; then
+            echo "FAIL: allowed domain was blocked"
+            sudo kill $ENGINE_PID 2>/dev/null || true
+            exit 1
+          elif [ -z "$RESULT" ]; then
+            echo "WARN: allowed domain resolved to nothing (network may be unavailable)"
+          else
+            echo "PASS: allowed domain forwarded correctly"
+          fi
+          sudo kill $ENGINE_PID 2>/dev/null || true
+
+      - name: Compile Swift UI (build check)
+        run: swiftc advoid-menu.swift -o advoid-menu

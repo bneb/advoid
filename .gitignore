@@ -3,7 +3,6 @@
 
 # Build Artifacts
 Advoid.app/
-AppIcon.icns
 advoid-engine
 
 # Generated LLVM & Object Files
@@ -15,5 +14,6 @@ final_tiny.o
 empty_blocklist.ll
 
 # Legacy Binaries
-mac-hole
-mac-hole-tiny
+advoid
+advoid-tiny
+LAUNCH.md

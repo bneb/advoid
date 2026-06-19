@@ -20,7 +20,7 @@ echo "Building Advoid..."
 # 1. Restore DNS and cleanup legacy daemons to prevent dead internet routing
 echo "Restoring network state and cleaning up daemons..."
 networksetup -listallnetworkservices | grep -v '*' | tail -n +2 | while read -r service; do
-    networksetup -setdnsservers "$service" empty
+    sudo networksetup -setdnsservers "$service" empty
 done 2>/dev/null || true
 
 sudo launchctl bootout system /Library/LaunchDaemons/com.machole.daemon.plist 2>/dev/null || true
@@ -35,10 +35,24 @@ sudo rm -f /Library/LaunchDaemons/com.machole.daemon.plist
 echo "Generating blocklist.ll from StevenBlack list..."
 go run compile_blocklist.go
 
+# 1.5 Process local blocklist if present
+LOCAL_TXT="blocklist.local.txt"
+LOCAL_HASHES="blocklist.local.hashes"
+LOCAL_INSTALL_DIR="/usr/local/etc/advoid"
+if [ -f "$LOCAL_TXT" ]; then
+    echo "Processing local blocklist from $LOCAL_TXT..."
+    go run compile_blocklist.go -local "$LOCAL_TXT" -output "$LOCAL_HASHES"
+    sudo mkdir -p "$LOCAL_INSTALL_DIR"
+    sudo cp "$LOCAL_HASHES" "$LOCAL_INSTALL_DIR/local.hashes"
+    echo "Installed local hashes to $LOCAL_INSTALL_DIR/local.hashes"
+else
+    echo "No local blocklist found ($LOCAL_TXT). Skipping."
+fi
+
 # 2. Compile Engine (LLVM)
 echo "Compiling LLVM core engine (advoid)..."
 llvm-link advoid.ll blocklist.ll -S -o final.ll
-llc -O0 final.ll -filetype=obj -o final.o
+llc -O0 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
 clang final.o -o advoid-engine
 
 # 3. Prepare App Bundle
