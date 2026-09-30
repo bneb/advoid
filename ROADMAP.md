@@ -147,6 +147,24 @@ in most cases by anything on the LAN that can reach the port.
   *severity* — it is a local DoS, not remote — but not the *correctness* of the
   fix, and it does not make the blocking loop acceptable: one stuck process on
   the same machine still takes DNS down for every application.
+- **Attempted twice; both reverted. What is now known:**
+  1. Round 6 built the cooperative-yield loop to `llvm-as` clean, then reported
+     "bind failed". **That conclusion was wrong.** A leaked test engine was still
+     holding 5333 (its command line is `./eng2`, so the `pkill -f /tmp/...` pattern
+     missed it), and the *known-good* build failed to bind identically. Lesson: before
+     blaming the code, confirm the port is actually free — `lsof` is unreliable here,
+     but a Python `bind()` attempt is not.
+  2. With the port genuinely free, the restored implementation scores **4/8** on the
+     hostile suite: the trickle case now passes, but the idle-65534-declaration and
+     four-concurrent-stalls cases still fail, and abrupt-disconnect recovery
+     regressed (the engine is alive but the follow-up UDP query goes unanswered).
+     So the loop is partially right and not yet correct. Source kept at
+     `/tmp/v2/impl_backup.ll` for the next attempt.
+- **A separate, confirmed bug found while diagnosing this:** `fatal_port` prints
+  garbage for any port >= 1000. The three-digit branch does `udiv(h_d, 1)` where it
+  means `urem(h_d, 10)`, so 5333 renders as `e33`. Every startup-failure message for
+  a four-digit port is unreadable, which is exactly what made the round-6 diagnosis
+  hard. Tracked in the Backlog.
 - **Not started:** the implementation. Concrete design, checked against the code:
   1. Add `@tcp_pool` (`[16 x 4096 x i8]`) plus per-slot arrays `@tcp_fd`,
      `@tcp_need`, `@tcp_got`, `@tcp_dl`, `@tcp_len`, `@tcp_state`. 16 slots is the
@@ -312,6 +330,7 @@ the right sprint when you pick it up.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
+| B2 | `[ ]` | medium | **`fatal_port` mis-prints ports >= 1000.** The three-digit branch does `udiv(h_d, 1)` instead of `urem(h_d, 10)`, so 5333 renders as `e33` and every four-digit startup error is unreadable. One-line fix. |
 | B1 | `[ ]` | high | **Oracle determinism.** `the TCP retry resolves the truncated query` flips between pass and fail across identical runs. Until the cause is known, `verify.sh` cannot gate a Definition of Done. Likely related to S2.1 (txid-keyed state table) — the same misdelivery that S2.1 describes would also explain a TCP retry sometimes receiving the upstream's 21-byte truncated answer and sometimes the full one. Investigate alongside S2.1. |
 
 ---
