@@ -27,59 +27,93 @@ jobs:
       - name: Run blocklist compiler tests
         run: go test ./... -v
 
+      - name: Preflight — IR assembles before the slow optimize step
+        # llc -O2 over an 80k-case switch takes a minute; catch syntax errors first.
+        run: |
+          llvm-as advoid.ll -o /dev/null
+          echo "advoid.ll assembles cleanly"
+
       - name: Generate blocklist
         run: go run compile_blocklist.go
 
-      - name: Link LLVM IR
-        run: llvm-link advoid.ll blocklist.ll -S -o final.ll
+      - name: Verify blocklist is reproducible
+        # writeIR emits cases in sorted order, so two runs must agree byte for byte.
+        run: |
+          cp blocklist.ll blocklist.first.ll
+          go run compile_blocklist.go
+          if ! cmp -s blocklist.first.ll blocklist.ll; then
+            echo "FAIL: blocklist.ll is not reproducible across runs"
+            diff <(head -50 blocklist.first.ll) <(head -50 blocklist.ll) || true
+            exit 1
+          fi
+          echo "PASS: blocklist.ll is byte-for-byte reproducible"
 
-      - name: Compile to object
-        run: llc -O0 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
+      - name: Build unprivileged test engine
+        # The engine defaults to port 53. Tests run it on 59 (unprivileged) so they
+        # need no sudo and cannot disturb the runner's resolver.
+        run: |
+          python3 - <<'PY'
+          import re
+          src = open('advoid.ll').read()
+          # @local_port is a real 16-bit port now, so an unprivileged high port
+          # can be expressed without byte packing.
+          src = src.replace('@local_port = global i16 53', '@local_port = global i16 5333')
+          src = src.replace('LLVM Advoid Active on :53', 'LLVM Advoid Active on :5333')
+          pat = re.compile(r'(@\w+ = private (?:unnamed_addr )?constant )\[\d+ x i8\] c"((?:[^"\\]|\\.)*)"')
+          src = pat.sub(lambda m: '%s[%d x i8] c"%s"' % (
+              m.group(1), len(re.sub(r'\\[0-9A-Fa-f]{2}', 'X', m.group(2))), m.group(2)), src)
+          open('advoid_test.ll', 'w').write(src)
+          PY
+          llvm-link advoid_test.ll blocklist.ll -S -o final_test.ll
+          llc -O2 final_test.ll -filetype=obj -o final_test.o -mtriple=arm64-apple-macosx14.0.0
+          clang -isysroot "$(xcrun --show-sdk-path)" final_test.o -o advoid-engine-test
 
-      - name: Link engine binary
-        run: clang final.o -o advoid-engine
+      - name: Engine behaviour regression tests
+        env:
+          ADVOID_TEST_PORT: "5333"
+        run: python3 tests/engine_test.py ./advoid-engine-test
+
+      - name: Build release engine
+        run: |
+          llvm-link advoid.ll blocklist.ll -S -o final.ll
+          llc -O2 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
+          clang -isysroot "$(xcrun --show-sdk-path)" final.o -o advoid-engine
 
       - name: Verify engine binary exists
         run: |
           file advoid-engine
           test -x advoid-engine
 
-      - name: Smoke test — blocked domain returns 0.0.0.0
+      - name: Smoke test — real port 53 with the system resolver tooling
         run: |
           sudo ./advoid-engine &
           ENGINE_PID=$!
-          # Wait for the engine to bind its socket
           sleep 2
-          # Query a known ad/telemetry domain; should be blocked
           RESULT=$(dig +short @127.0.0.1 doubleclick.net A 2>/dev/null || true)
           echo "dig result for doubleclick.net: $RESULT"
+          sudo kill $ENGINE_PID 2>/dev/null || true
           if echo "$RESULT" | grep -q "0\.0\.0\.0"; then
             echo "PASS: blocked domain returned 0.0.0.0"
           else
             echo "FAIL: blocked domain did not return 0.0.0.0"
-            sudo kill $ENGINE_PID 2>/dev/null || true
             exit 1
           fi
-          sudo kill $ENGINE_PID 2>/dev/null || true
 
-      - name: Smoke test — allowed domain forwards correctly
+      - name: Smoke test — TCP fallback is served on port 53
         run: |
           sudo ./advoid-engine &
           ENGINE_PID=$!
           sleep 2
-          # Query a known safe domain; should resolve normally (not 0.0.0.0)
-          RESULT=$(dig +short @127.0.0.1 github.com A 2>/dev/null || true)
-          echo "dig result for github.com: $RESULT"
-          if echo "$RESULT" | grep -q "0\.0\.0\.0"; then
-            echo "FAIL: allowed domain was blocked"
-            sudo kill $ENGINE_PID 2>/dev/null || true
-            exit 1
-          elif [ -z "$RESULT" ]; then
-            echo "WARN: allowed domain resolved to nothing (network may be unavailable)"
-          else
-            echo "PASS: allowed domain forwarded correctly"
-          fi
+          # +tcp forces the TCP transport the engine now serves.
+          RESULT=$(dig +tcp +short @127.0.0.1 doubleclick.net A 2>/dev/null || true)
           sudo kill $ENGINE_PID 2>/dev/null || true
+          echo "dig +tcp result: $RESULT"
+          if echo "$RESULT" | grep -q "0\.0\.0\.0"; then
+            echo "PASS: TCP query answered"
+          else
+            echo "FAIL: TCP query was not answered"
+            exit 1
+          fi
 
       - name: Compile Swift UI (build check)
         run: swiftc advoid-menu.swift -o advoid-menu

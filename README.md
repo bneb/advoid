@@ -4,7 +4,8 @@
 [![CI](https://github.com/bneb/advoid/actions/workflows/ci.yml/badge.svg)](https://github.com/bneb/advoid/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/bneb/advoid?include_prereleases)](https://github.com/bneb/advoid/releases/latest)
 
-Advoid is a local DNS adblocker for macOS. It resolves DNS queries directly from the loopback interface, blocking known ad and telemetry domains using a compiled LLVM IR matching engine.
+Advoid is a local DNS adblocker for macOS. It resolves DNS queries directly from the loopback interface, blocking known ad and telemetry domains using a compiled LLVM IR matching engine. Both UDP and TCP are served,
+so truncated responses can be retried as RFC 1035 requires.
 
 > **Disclaimer:** Advoid intercepts all DNS traffic on your Mac and requires administrator privileges to install. If the engine crashes or is misconfigured, DNS resolution will fail and your internet will stop working. To recover: open the menu bar app and click **Disable**, or run `./uninstall.sh`. This is MIT-licensed software with no warranty. It works on my machine.
 
@@ -28,14 +29,14 @@ Advoid is a local DNS adblocker for macOS. It resolves DNS queries directly from
 To update the blocklist: either download a new release (the blocklist is compiled in at build time), or rebuild from source to pull the latest StevenBlack list.
 
 ## Architecture
-- **Engine:** Written in LLVM IR (`advoid.ll`), processing UDP packets on port 53.
-- **Blocklist Compiler:** A Go utility (`compile_blocklist.go`) that fetches the StevenBlack hosts list, filters it against a hardcoded system Safelist, and compiles it into an LLVM `switch` statement using an FNV-1a hash.
+- **Engine:** Written in LLVM IR (`advoid.ll`), serving UDP and TCP DNS on port 53.
+- **Blocklist Compiler:** A Go utility (`compile_blocklist.go`) that fetches the StevenBlack hosts list, filters it against a system Safelist, and compiles it into an LLVM `switch` statement using an FNV-1a hash. Matching is case-insensitive, as DNS names are (RFC 4343).
 - **UI:** A macOS Menu Bar application written in Swift for toggling DNS state dynamically across all active system network interfaces.
 - **Memory Model:** The engine operates without dynamic heap allocations during packet processing, using vectorized 64-bit register writes to mutate the stack buffer at wire-speed.
 
 For a comprehensive technical deep-dive into the FNV-1a hashing logic and system daemonization, read the [Architecture Document](ARCHITECTURE.md).
 
-For a line-by-line walkthrough of the LLVM IR packet engine — including socket setup, FNV-1a hashing, the 150,000-case switch statement, and in-place DNS packet mutation — read the **[Technical Deep Dive](TECHNICAL.md)**.
+For a line-by-line walkthrough of the LLVM IR packet engine — including socket setup, FNV-1a hashing, the compiled switch statement, and in-place DNS packet mutation — read the **[Technical Deep Dive](TECHNICAL.md)**.
 
 ## How Advoid Compares
 
@@ -43,12 +44,12 @@ For a line-by-line walkthrough of the LLVM IR packet engine — including socket
 |---|---|---|---|---|---|
 | **Scope** | System-wide DNS | Network-wide DNS | Network-wide DNS | Browser only | Cloud DNS |
 | **Setup** | Menu bar app | Raspberry Pi / Docker | Docker / binary | Browser install | Change DNS setting |
-| **Memory** | ~1.5 MB | ~100 MB | ~50 MB | Varies | N/A (cloud) |
+| **Memory** | See BENCHMARKS.md | ~100 MB | ~50 MB | Varies | N/A (cloud) |
 | **Blocklist** | Compiled at build time | SQLite, auto-updating | Filter lists, auto-updating | Extension-managed | Cloud-managed |
 | **Local-only** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ❌ Third party sees all DNS |
 | **Dashboard** | Menu bar toggle | Web UI | Web UI | Extension popup | Web dashboard |
 | **Blocked latency** | Microseconds (in-place mutation) | Milliseconds (hash table lookup) | Milliseconds (filter traversal) | Milliseconds (JS interceptor) | Milliseconds (WAN RTT) |
-| **Code size** | ~1,200 lines | ~50k+ lines | ~100k+ lines | Varies | Closed source |
+| **Code size** | ~1,800 lines | ~50k+ lines | ~100k+ lines | Varies | Closed source |
 
 Advoid's tradeoff: no dashboard, no auto-updates, no cache — in exchange for minimal code, flat memory, and a hot path you can step through in a debugger and fully understand.
 
@@ -144,19 +145,31 @@ Click the menu bar icon to see live statistics:
 - **Forwarded** — queries relayed upstream to Cloudflare
 - **Uptime** — how long the daemon has been running
 
-Counts are written to `/tmp/advoid.stats` every 128 queries by the engine. The menu bar app reads them when you open the menu.
+Counts are written to `/usr/local/var/advoid/advoid.stats` every 128 queries by the engine. The menu bar app reads them when you open the menu. Both files are `0644`; the directory they live in is root-owned.
+
+The menu also shows an **Engine:** row. That is a live check, not a file read: the app sends one DNS query to `127.0.0.1:53` and reports the engine healthy only if a well-formed response comes back. Before enabling Advoid it performs the same probe and refuses to point system DNS at a port nothing is answering on.
 
 ## Sharp Edges
 
-Things I'd fix if this were more than a personal project:
+Things that are still rough:
 
-- **Build-time blocklist.** Updating the blocklist requires a full rebuild (`./install.sh`). Pi-hole updates automatically. I chose compile-time lookup over runtime convenience. The local hashes file feature partially addresses this for custom domains, but the main blocklist is still AOT.
+- **Build-time blocklist.** Updating the blocklist requires a full rebuild (`./install.sh`), which now also means the ~55 s `llc -O2` step. Pi-hole updates automatically. The local hashes file partially addresses this for custom domains, but the main blocklist is still AOT.
 - **No query caching.** Every allowed query is forwarded upstream, even if it was resolved 10 seconds ago. Pi-hole and AdGuard Home cache responses. Adding a small TTL cache would cut upstream latency for repeat queries, but it'd mean dynamic memory or a pre-allocated cache array, and I haven't gotten to it.
-- **arm64 only.** The IR is tied to the Darwin/ARM64 syscall ABI and struct layouts (sin_len byte at offset 0, etc.). Porting to x86-64 means changing the datalayout, triple, and syscall conventions.
-- **No IPv6.** The engine creates an IPv4 socket. IPv6 DNS queries won't be intercepted. Adding a second socket is straightforward but doubles the pollfd management.
-- **Error handling is minimal.** If `@recvfrom` or `@sendto` fail, the engine doesn't notice. In practice this hasn't been a problem — DNS is UDP, packets get dropped sometimes, clients retry — but it's not robust.
+- **No IPv6 transport.** The engine binds IPv4 sockets only, so DNS queries sent over IPv6 are not intercepted and use the system default. Adding a second pair of sockets is straightforward but doubles the pollfd management.
+- **arm64 only.** The IR is tied to the Darwin/ARM64 syscall ABI and struct layouts (sin_len byte at offset 0, pollfd layout). Porting to x86-64 means changing the datalayout, triple, and syscall conventions.
 - **No code signing for the binary.** macOS Gatekeeper will flag the unsigned binary. You'll need to right-click → Open on first launch. Proper notarization requires an Apple Developer account.
 - **The custom blocklist path is hardcoded.** `/usr/local/etc/advoid/local.hashes` works on my machine but isn't configurable. Making it a command-line argument or config file would be better.
+- **No EDNS0 advertising.** The engine forwards the client's OPT record untouched and caps its own UDP buffer at 512 bytes. If upstream ignores the client's advertised buffer size and returns more than 512 bytes, the engine sets the TC bit so the client retries over TCP, but it cannot itself buffer a larger UDP answer.
+
+Things that used to be on this list and are now fixed, because the failure mode was too sharp to leave:
+
+- **TCP was not served at all.** A truncated UDP answer told the client to retry on a port nothing was listening on, so those queries simply failed. The engine now listens on TCP too and relays the retry.
+- **TCP relaying silently failed until two unrelated queries had been sent.** A bad pointer computation in the socket-timeout helper was writing 8 bytes into the caller's stack, landing on the upstream address or a poll entry depending on traffic. One-line fix; TCP relaying now works on a fresh engine.
+- **Startup failures were silent.** A failed `bind()` (port already in use) left the daemon polling unbound sockets forever while the menu bar still showed the shield as active — total connectivity loss with no signal. `socket()`, `bind()`, and `listen()` are now checked; a failure logs the port, records a status file, and exits non-zero so launchd restarts it.
+- **`recvfrom` errors corrupted the QNAME scan.** A `-1` return was treated as an enormous buffer length, so the hash walked off the end of the packet. Errors are now handled.
+- **The safelist only matched exact domains.** It protected `apple.com` but not `securemetrics.apple.com`, which is a real Apple telemetry host that appears in the upstream list. Safelist matching is now suffix-aware, and the compiler fails the build on a hash collision instead of silently blocking the wrong domain.
+- **Blocked answers ignored the query type.** An AAAA query received a fabricated A record. Blocked A and AAAA queries now get `0.0.0.0` and `::` respectively, and every other qtype gets a NOERROR/NODATA response rather than a record the client never asked for.
+- **Stats were written to `/tmp` as root.** They now live in a root-owned `/usr/local/var/advoid` directory that no local user can pre-create or swap for a symlink.
 
 ## Contributing
 
@@ -166,7 +179,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build prerequisites and architecture 
 
 ### Why LLVM IR instead of C or Rust?
 
-I wanted to know exactly what instructions were running on every DNS query. C gives you the C abstract machine — the compiler is free to optimize within the standard, and you get what you get. Writing IR directly means every load, store, and branch is intentional. The blocklist-as-switch-statement thing started as a "what if" and turned out to work well — 150k domains compile to a single computed branch with no hash table overhead.
+I wanted to know exactly what instructions were running on every DNS query. C gives you the C abstract machine — the compiler is free to optimize within the standard, and you get what you get. Writing IR directly means every load, store, and branch is intentional. The blocklist-as-switch-statement thing started as a "what if" and turned out to work well — the list compiles to a single computed branch with no hash table overhead.
 
 It's not the pragmatic choice. C would have been faster to write, Rust would have been safer. But for a personal project where the goal was understanding the full stack from syscall to response packet, IR was the right level of abstraction.
 
@@ -188,7 +201,7 @@ The current engine only creates an IPv4 socket. IPv6 DNS queries (over IPv6 tran
 
 ### How is this different from editing /etc/hosts?
 
-`/etc/hosts` blocks are static — you can't toggle them on/off without editing the file. Advoid gives you a menu bar toggle and forwards unblocked queries to Cloudflare instead of relying on your system resolver. It also compiles 150,000+ domains into an efficient lookup, which would be impractical in a flat hosts file.
+`/etc/hosts` blocks are static — you can't toggle them on/off without editing the file. Advoid gives you a menu bar toggle and forwards unblocked queries to Cloudflare instead of relying on your system resolver. It also compiles tens of thousands of domains into an efficient lookup, which would be impractical in a flat hosts file.
 
 ### Does it auto-start on boot?
 

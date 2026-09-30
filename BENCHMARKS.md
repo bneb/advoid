@@ -10,11 +10,39 @@ Methodology for comparing Advoid against Pi-hole and AdGuard Home. Reproduce on 
 |----------|-------|
 | **Hardware** | MacBook Pro (Apple Silicon M-series, 16 GB RAM) |
 | **OS** | macOS Sequoia 15.x |
-| **Advoid** | v1.0.0, compiled with `llc -O0` |
+| **Advoid** | built with `llc -O2` |
 | **Pi-hole** | Running in Docker (Colima), `pihole/pihole:latest` |
 | **AdGuard Home** | Running in Docker (Colima), `adguard/adguardhome:latest` |
 | **Test tool** | `dnsperf` (Homebrew: `brew install dnsperf`) |
 | **Query file** | 10,000 domain sample (50% blocked, 50% allowed) |
+
+## Measured: engine hot path (2025, Apple Silicon)
+
+These are the numbers I have actually measured, on the machine in the table above.
+They cover only the engine's matching hot path — `hash_qname` plus `is_blocked` —
+with the QNAME already extracted. They are not a comparison against Pi-hole or
+AdGuard Home; those tables remain blank below.
+
+Method: 1,000,000 iterations over an alternating mix of blocked and allowed names,
+timed with `mach_absolute_time()`. Reproduce with `tests/` style harnesses against
+the built `advoid-engine`; the blocklist is compiled into the engine.
+
+| Build | `is_blocked` table lookup | hash + lookup |
+|---|---|---|
+| `llc -O0` | 45,464 ns | 47,340 ns |
+| `llc -O2` | **12 ns** | **342 ns** |
+
+**This is why the build uses `-O2`.** Optimisation is not a micro-tuning knob here:
+at `-O0` LLVM compiles the switch into ~670k instructions of unoptimised
+compare/branch chains and every lookup costs tens of microseconds. `-O2` collapses
+it and the lookup drops to nanoseconds, a ~3,800x difference. The trade is compile time: `-O2` needs about 55 s for the full engine where
+`-O0` needed about 1 s. A minute of build time buys four orders of magnitude of
+query latency, which is the right trade for a resolver.
+
+Output from `llc -O2` is byte-identical in behaviour to `-O0` (verified over 5,000
+blocked-domain hashes with zero mismatches), so this is purely a codegen choice.
+
+Binary size with the current blocklist: ~2.7 MB.
 
 ## Methodology
 
@@ -24,7 +52,7 @@ Methodology for comparing Advoid against Pi-hole and AdGuard Home. Reproduce on 
 # Advoid engine (no blocklist)
 wc -c advoid-engine
 
-# Advoid engine + compiled blocklist (~150k domains)
+# Advoid engine + compiled blocklist
 wc -c <path-to>/advoid-engine
 
 # Advoid.app bundle (engine + UI + resources)
@@ -122,11 +150,11 @@ done | awk '{print $2}' | sort -n | tail -1  # peak CPU%
 
 | Adblocker | Engine Binary | Full Install | Blocklist Representation |
 |-----------|--------------|-------------|--------------------------|
-| **Advoid** | ~200 KB (no blocklist) / ~800 KB (with 150k domains) | ~1.2 MB (.app bundle) | Compiled LLVM `switch` statement |
+| **Advoid** | ~2.7 MB (engine + compiled blocklist) | ~1.2 MB (.app bundle) | Compiled LLVM `switch` statement |
 | **Pi-hole** | — | ~300 MB (Docker image) | SQLite database + gravity list |
 | **AdGuard Home** | — | ~100 MB (Docker image) | Binary filter lists in memory |
 
-Advoid's compiled blocklist is notably compact: 150,000 domains become ~128 KB of machine code after `llc` compilation. The switch-statement representation has no per-entry pointer overhead — each hash is an 8-byte immediate in the instruction stream.
+Advoid's compiled blocklist becomes machine code with no per-entry pointer overhead. The switch-statement representation has no per-entry pointer overhead — each hash is an 8-byte immediate in the instruction stream.
 
 ### Memory at Idle
 
@@ -148,7 +176,7 @@ Advoid's idle footprint is dominated by `@state_addrs` (1 MB BSS array for TXID�
 
 *Fill after running `dnsperf` benchmark as described above.*
 
-**Expected characteristics:** Advoid's blocked-domain response should be the fastest of the three — the hot path is: hash the QNAME (~150 instructions), execute the switch (jump table or ~17 compare/branch levels for 150k entries), mutate the buffer in-place (6 instructions), and `sendto`. No allocation, no database query, no filter list traversal. Allowed-domain latency should be comparable to Pi-hole/AdGuard Home, as all three forward upstream to an external resolver and the dominant factor is network latency.
+**Expected characteristics:** Advoid's blocked-domain response should be the fastest of the three — the hot path is: hash the QNAME (~150 instructions), execute the switch (jump table or a binary-search tree of comparisons), mutate the buffer in-place (6 instructions), and `sendto`. No allocation, no database query, no filter list traversal. Allowed-domain latency should be comparable to Pi-hole/AdGuard Home, as all three forward upstream to an external resolver and the dominant factor is network latency.
 
 ### Memory Under Load
 
@@ -191,7 +219,7 @@ command -v docker >/dev/null 2>&1 || echo "Docker required for Pi-hole/AdGuard H
 export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 go run compile_blocklist.go
 llvm-link advoid.ll blocklist.ll -S -o final.ll
-llc -O0 final.ll -filetype=obj -o final.o
+llc -O2 final.ll -filetype=obj -o final.o
 clang final.o -o advoid-engine
 
 echo "=== Binary Size ==="
@@ -212,7 +240,7 @@ echo "Generate a query test file and run: dnsperf -s 127.0.0.1 -p 53 -d query_te
 
 ## Interpreting the Numbers
 
-**Why Advoid is smaller**: The engine is 212 lines of IR compiled directly to machine code. No libc (beyond what clang links), no runtime, no web server, no database. The blocklist is machine code — 150,000 `i64` case values that the compiler converts to jump tables.
+**Why Advoid is smaller**: The engine is ~1,100 lines of IR compiled directly to machine code. No libc (beyond what clang links), no runtime, no web server, no database. The blocklist is machine code — one `i64` case value per blocked domain.
 
 **Why Advoid's blocked latency wins**: Pi-hole and AdGuard Home parse the query, do a string lookup in a hash table or trie, construct a response, and send it. Advoid parses the query, hashes the QNAME (single pass, ~150 bytes max), executes a `switch` (compiled to a jump table for dense clusters), and modifies the buffer in-place. There's no string allocation, no hash table probe chasing pointers through memory, no response construction on the heap.
 

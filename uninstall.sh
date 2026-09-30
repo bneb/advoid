@@ -5,7 +5,7 @@ set -e
 echo "Uninstalling Advoid..."
 
 echo "1. Restoring default DNS settings..."
-networksetup -listallnetworkservices | grep -v '*' | tail -n +2 | while read -r service; do
+networksetup -listallnetworkservices | tail -n +2 | grep -v '^\*' | while read -r service; do
     sudo networksetup -setdnsservers "$service" empty
 done 2>/dev/null || true
 
@@ -18,7 +18,15 @@ if [ -f "/Library/LaunchDaemons/com.advoid.daemon.plist" ]; then
     sudo rm -f /Library/LaunchDaemons/com.advoid.daemon.plist
 fi
 
-echo "4. Removing Application bundle..."
+echo "4. Removing root-owned engine and state..."
+sudo rm -f /usr/local/libexec/advoid-engine
+sudo rm -rf /usr/local/etc/advoid
+
+sudo rm -rf /usr/local/var/advoid
+# Clean up files written by older builds that used /tmp.
+sudo rm -f /tmp/advoid.stats /tmp/advoid.status.txt
+
+echo "5. Removing Application bundle..."
 sudo rm -rf /Applications/Advoid.app
 
 echo "Advoid has been completely uninstalled."

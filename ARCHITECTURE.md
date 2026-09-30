@@ -21,11 +21,13 @@ flowchart TD
 
 - **Fetch & Parse:** Streams the StevenBlack host list via HTTP.
 - **Hashing & Filtering:** Computes a 64-bit FNV-1a hash for each parsed domain and filters against a hardcoded Safelist to mitigate upstream poisoning attacks.
-- **IR Generation:** Emits raw LLVM Intermediate Representation (`blocklist.ll`), constructing a single `switch` statement mapping ~150,000 hashes to a boolean return.
+- **IR Generation:** Emits raw LLVM Intermediate Representation (`blocklist.ll`), constructing a single `switch` statement mapping every blocked domain hash to a boolean return.
 
 ## 2. Packet Engine (LLVM IR)
 
 `advoid.ll` is the execution engine, written in pure LLVM IR targeting POSIX system calls.
+It serves DNS over both UDP and TCP: TCP is not an optimisation, it is required by
+RFC 1035 §4.2.1 so a client that receives a truncated (TC=1) UDP answer can retry.
 
 ```mermaid
 sequenceDiagram
@@ -52,7 +54,7 @@ sequenceDiagram
     end
 ```
 
-- **Socket Binding:** Requests an IPv4 datagram socket bound to `127.0.0.1:53`.
+- **Socket Binding:** Binds an IPv4 datagram socket and an IPv4 TCP listener to `127.0.0.1:53`, with `SO_REUSEADDR` set so a restart does not fail while old TCP sockets linger in `TIME_WAIT`. A failed `socket()`, `bind()`, or `listen()` writes a diagnostic and exits non-zero instead of polling unbound descriptors.
 - **Packet Interception:** Captures UDP payloads into a static stack-allocated buffer via `recvfrom`.
 - **Domain Extraction:** Parses the DNS payload manually to extract the QNAME.
 - **Inline Hashing:** Computes the FNV-1a hash and jumps via the linked `blocklist.ll` switch block.

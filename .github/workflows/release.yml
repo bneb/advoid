@@ -28,14 +28,24 @@ jobs:
       - name: Generate blocklist
         run: go run compile_blocklist.go
 
+      - name: Verify the blocklist is non-trivial
+        # A failed or restructured upstream fetch must never ship as a release.
+        run: |
+          CASES=$(grep -c '%block' blocklist.ll || true)
+          echo "blocklist cases: $CASES"
+          if [ "$CASES" -lt 10000 ]; then
+            echo "FAIL: blocklist has only $CASES cases"
+            exit 1
+          fi
+
       - name: Link LLVM IR
         run: llvm-link advoid.ll blocklist.ll -S -o final.ll
 
       - name: Compile to object
-        run: llc -O0 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
+        run: llc -O2 final.ll -filetype=obj -o final.o -mtriple=arm64-apple-macosx14.0.0
 
       - name: Link engine binary
-        run: clang final.o -o advoid-engine
+        run: clang -isysroot "$(xcrun --show-sdk-path)" final.o -o advoid-engine
 
       - name: Assemble App bundle
         run: |

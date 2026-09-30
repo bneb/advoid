@@ -17,3 +17,11 @@ empty_blocklist.ll
 advoid
 advoid-tiny
 LAUNCH.md
+
+# Local install helper
+reinstall-assets.sh
+
+
+# Link artifacts
+final.ll
+final.o

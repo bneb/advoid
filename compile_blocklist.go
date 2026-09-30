@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -36,12 +37,27 @@ const fnvOffset = uint64(0xcbf29ce484222325)
 
 // safelist contains critical infrastructure domains that must never be blocked,
 // protecting the system from denial-of-service if the upstream list is compromised.
+//
+// Matching is suffix-aware: an entry protects the domain itself and everything
+// beneath it. Matching exact domains only would leave e.g. securemetrics.apple.com
+// blockable, which is precisely the telemetry host the safelist exists to protect.
 var safelist = []string{
 	"localhost",
 	"github.com",
 	"raw.githubusercontent.com",
 	"apple.com",
 	"icloud.com",
+}
+
+// isSafelisted reports whether domain is a safelist entry or a subdomain of one.
+func isSafelisted(domain string) bool {
+	d := strings.ToLower(strings.TrimSuffix(domain, "."))
+	for _, safe := range safelist {
+		if d == safe || strings.HasSuffix(d, "."+safe) {
+			return true
+		}
+	}
+	return false
 }
 
 // hashLabel applies the FNV-1a hash algorithm to a single domain label.
@@ -74,6 +90,10 @@ func hashWire(domain string) uint64 {
 	return hash
 }
 
+// hashFn is the hash used for every domain. It is a variable so tests can force
+// a collision and exercise the detection path; production always uses hashWire.
+var hashFn = hashWire
+
 // parseLine extracts the target domain from a StevenBlack host file line.
 // It returns an empty string if the line is a comment or invalid.
 func parseLine(line string) string {
@@ -87,37 +107,64 @@ func parseLine(line string) string {
 	return parts[1]
 }
 
-// fetchStream executes an HTTP GET request to retrieve the blocklist.
+// fetchStream executes an HTTP GET request to retrieve the blocklist, rejecting
+// non-200 responses so an error page is never compiled into the engine.
 func fetchStream() (io.ReadCloser, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(blocklistURL)
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("fetching %s: unexpected status %s", blocklistURL, resp.Status)
+	}
 	return resp.Body, nil
 }
 
-// processStream iterates over the fetched blocklist, extracting valid domains
-// and computing their unique 64-bit FNV-1a hashes into a map, while ignoring safely-listed domains.
-func processStream(r io.Reader) map[uint64]struct{} {
+// minExpectedDomains guards against silently compiling a broken blocklist. If the
+// upstream fetch returns an error page, a truncated response, or a restructured
+// list, we would otherwise ship a binary that blocks almost nothing.
+const minExpectedDomains = 10000
+
+// maxLocalHashes mirrors the size of @local_hashes in advoid.ll. The engine caps
+// its runtime load at this many entries, so warn rather than silently truncating.
+const maxLocalHashes = 1024
+
+// processStream iterates over the fetched blocklist, extracting valid domains and
+// computing their unique 64-bit FNV-1a hashes into a map, while ignoring
+// safelisted domains and their subdomains.
+//
+// It also detects hash collisions. Two distinct domains mapping to one 64-bit hash
+// would silently block the wrong name, which is unacceptable for a blocklist, so a
+// collision is reported as an error rather than ignored.
+func processStream(r io.Reader) (map[uint64]struct{}, error) {
 	hashes := make(map[uint64]struct{})
-	
-	safeHashes := make(map[uint64]struct{})
-	for _, safeDomain := range safelist {
-		safeHashes[hashWire(safeDomain)] = struct{}{}
-	}
+	seen := make(map[uint64]string)
 
 	scanner := bufio.NewScanner(r)
+	// Allow long lines; the default 64 KiB token limit is ample here but make the
+	// intent explicit since a single line is one domain.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		domain := parseLine(scanner.Text())
-		if domain != "" {
-			hash := hashWire(domain)
-			if _, isSafe := safeHashes[hash]; !isSafe {
-				hashes[hash] = struct{}{}
-			}
+		if domain == "" || isSafelisted(domain) {
+			continue
 		}
+		hash := hashFn(strings.ToLower(domain))
+		if prev, ok := seen[hash]; ok {
+			if prev != domain {
+				return nil, fmt.Errorf("FNV-1a collision: %q and %q both hash to %d", prev, domain, hash)
+			}
+			continue
+		}
+		seen[hash] = domain
+		hashes[hash] = struct{}{}
 	}
-	return hashes
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading blocklist: %w", err)
+	}
+	return hashes, nil
 }
 
 // writeIR outputs the LLVM Intermediate Representation file containing
@@ -131,11 +178,20 @@ func writeIR(hashes map[uint64]struct{}, path string) error {
 
 	w := bufio.NewWriter(f)
 	writeIRHeader(w)
-	
+
+	// Emit in sorted order so the generated file is byte-for-byte reproducible.
+	// Ranging over a map would reshuffle every case on each build, making diffs
+	// and review of blocklist changes useless.
+	sorted := make([]uint64, 0, len(hashes))
 	for h := range hashes {
+		sorted = append(sorted, h)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return int64(sorted[i]) < int64(sorted[j]) })
+
+	for _, h := range sorted {
 		w.WriteString(fmt.Sprintf("    i64 %d, label %%block\n", int64(h)))
 	}
-	
+
 	writeIRFooter(w)
 	return w.Flush()
 }
@@ -163,18 +219,26 @@ func processLocalFile(inputPath, outputPath string) error {
 	defer in.Close()
 
 	var hashes []uint64
-	seen := make(map[uint64]struct{})
+	seen := make(map[uint64]string)
 	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		hash := hashWire(line)
-		if _, exists := seen[hash]; !exists {
-			seen[hash] = struct{}{}
-			hashes = append(hashes, hash)
+		if isSafelisted(line) {
+			continue
 		}
+		hash := hashFn(strings.ToLower(line))
+		if prev, exists := seen[hash]; exists {
+			if prev != line {
+				return fmt.Errorf("FNV-1a collision: %q and %q both hash to %d", prev, line, hash)
+			}
+			continue
+		}
+		seen[hash] = line
+		hashes = append(hashes, hash)
 	}
 	if err := scanner.Err(); err != nil {
 		return err
@@ -196,6 +260,10 @@ func processLocalFile(inputPath, outputPath string) error {
 		}
 	}
 	fmt.Printf("Wrote %d local domain hashes to %s\n", len(hashes), outputPath)
+	if len(hashes) > maxLocalHashes {
+		fmt.Fprintf(os.Stderr, "warning: the engine loads at most %d local hashes; the remaining %d will be ignored\n",
+			maxLocalHashes, len(hashes)-maxLocalHashes)
+	}
 	return nil
 }
 
@@ -219,8 +287,16 @@ func main() {
 	}
 	defer body.Close()
 
-	hashes := processStream(body)
+	hashes, err := processStream(body)
+	if err != nil {
+		panic(err)
+	}
+	if len(hashes) < minExpectedDomains {
+		panic(fmt.Sprintf("refusing to write blocklist.ll: only %d domains parsed (expected >= %d); the upstream list may be broken or restructured",
+			len(hashes), minExpectedDomains))
+	}
 	if err := writeIR(hashes, "blocklist.ll"); err != nil {
 		panic(err)
 	}
+	fmt.Printf("Wrote %d blocked domains to blocklist.ll\n", len(hashes))
 }
