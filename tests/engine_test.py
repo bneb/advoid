@@ -371,6 +371,21 @@ def main():
             check(len(r) == qend, "NODATA reply has no trailing OPT bytes",
                   f"len={len(r)} expected={qend}")
 
+        # A question that ends before QTYPE/QCLASS must not be answered using
+        # bytes left in the buffer by the previous packet.
+        # Seed the buffer with an A query so the stale QTYPE bytes read as 1.
+        prim = udp_query(port, header(txid=0x0E0E) + qwire("doubleclick.net")
+                         + struct.pack("!HH", 1, 1))
+        trunc = udp_query(port, header(txid=0x0F0F) + qwire("doubleclick.net") + b"\x00")
+        if trunc is None:
+            check(False, "truncated question is not answered from stale bytes",
+                  "no reply")
+        else:
+            arc2 = struct.unpack("!H", trunc[10:12])[0]
+            check(arc2 == 0,
+                  "truncated question yields no answer invented from stale bytes",
+                  f"arcount={arc2} len={len(trunc)}")
+
         print("\n### a reply must go only to the client that asked")
         # The state table is keyed by transaction ID alone. Two queries in flight
         # with the same 16-bit ID collide, and without question validation one
