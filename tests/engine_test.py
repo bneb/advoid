@@ -372,19 +372,19 @@ def main():
                   f"len={len(r)} expected={qend}")
 
         # A question that ends before QTYPE/QCLASS must not be answered using
-        # bytes left in the buffer by the previous packet.
-        # Seed the buffer with an A query so the stale QTYPE bytes read as 1.
-        prim = udp_query(port, header(txid=0x0E0E) + qwire("doubleclick.net")
-                         + struct.pack("!HH", 1, 1))
-        trunc = udp_query(port, header(txid=0x0F0F) + qwire("doubleclick.net") + b"\x00")
+        # bytes left in the buffer by the previous packet. Deterministic: send an A
+        # query first so the stale bytes at offset 31 read as qtype 1.
+        qn3 = qwire("doubleclick.net")
+        udp_query(port, header(txid=0x0E0E) + qn3 + struct.pack("!HH", 1, 1))
+        trunc = udp_query(port, header(txid=0x0F0F) + qn3 + b"\x00")
         if trunc is None:
-            check(False, "truncated question is not answered from stale bytes",
+            check(False, "truncated question yields no answer from stale bytes",
                   "no reply")
         else:
-            arc2 = struct.unpack("!H", trunc[10:12])[0]
-            check(arc2 == 0,
+            an3 = struct.unpack("!H", trunc[6:8])[0]
+            check(an3 == 0,
                   "truncated question yields no answer invented from stale bytes",
-                  f"arcount={arc2} len={len(trunc)}")
+                  f"an={an3} len={len(trunc)}")
 
         print("\n### a reply must go only to the client that asked")
         # The state table is keyed by transaction ID alone. Two queries in flight

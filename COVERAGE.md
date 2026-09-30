@@ -48,7 +48,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 12 | Slow-loris stalls the whole resolver | reviewer | **yes** | `tests/hostile_test.py` — proven failing against the current build |
 | 13 | `@tcp_pending` leaks and disables TCP | reviewer | **no** | S1.2 |
 | 14 | NODATA reply carries the client's OPT | reviewer | **yes** | suite: *NODATA reply has no trailing OPT bytes* |
-| 15 | Missing QTYPE/CLASS answered from stale bytes | reviewer | **no** | S3.2 |
+| 15 | Missing QTYPE/CLASS answered from stale bytes | reviewer | **yes** | suite: *truncated question yields no answer invented from stale bytes* |
 | 16 | No QR/opcode/QDCOUNT validation | reviewer | **no** | S3.4 |
 
 **6 of 16 covered.** The uncovered ones are precisely the open roadmap items —

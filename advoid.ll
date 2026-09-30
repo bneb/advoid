@@ -852,7 +852,12 @@ found_q_end:
     ; next_q_i indexes the byte after the QNAME terminator, so it is the start
     ; of QTYPE. q_end is the first byte of the answer section.
     %q_end = add i64 %next_q_i, 4
-    br label %read_qtype
+    ; The question must actually contain QTYPE and QCLASS. Reading them past the
+    ; received length took whatever the previous packet left in the buffer and
+    ; invented an answer for a question that was never asked.
+    %qneed = add i64 %next_q_i, 4
+    %qshort = icmp ugt i64 %qneed, %len
+    br i1 %qshort, label %answer_nodata, label %read_qtype
 
 read_qtype:
     ; QTYPE is a big-endian u16 at next_q_i.
