@@ -1051,8 +1051,12 @@ write:
 
     ; RDATA = all zeros: 0.0.0.0 (4 bytes) for A, :: (16 bytes) for AAAA.
     %r_off = add i64 %off, 12
-    %r_p = getelementptr inbounds i8, ptr %buf, i64 %r_off
-    store i64 0, ptr %r_p, align 8
+    ; Write the zero rdata a byte at a time. %r_off is derived from the question
+    ; length, so it carries no alignment guarantee: `store i64 ..., align 8` there is
+    ; undefined behaviour even though arm64 tolerates it in practice.
+    call void @store_be32(ptr %buf, i64 %r_off, i64 0)
+    %r_o4 = add i64 %r_off, 4
+    call void @store_be32(ptr %buf, i64 %r_o4, i64 0)
     ; Only AAAA has a second 8 bytes. Issuing this store unconditionally would put
     ; up to 12 bytes past the end of the packet for an A record.
     br label %rdata_tail
@@ -1062,8 +1066,9 @@ rdata_tail:
 
 write_rdata_hi:
     %r_o8 = add i64 %r_off, 8
-    %r_p2 = getelementptr inbounds i8, ptr %buf, i64 %r_o8
-    store i64 0, ptr %r_p2, align 8
+    call void @store_be32(ptr %buf, i64 %r_o8, i64 0)
+    %r_o12 = add i64 %r_off, 12
+    call void @store_be32(ptr %buf, i64 %r_o12, i64 0)
     br label %done
 
 done:

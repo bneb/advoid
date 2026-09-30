@@ -310,7 +310,7 @@ reproduce.
 | S3.2 | `[x]` | medium | **Question section not length-checked** — TYPE/CLASS fabricated from stale buffer bytes when absent |
 | S3.3 | `[ ]` | medium | **Truncated-record handling** — when TC is set the relayed packet still claims records it does not contain; drop the incomplete tail and fix the counts |
 | S3.4 | `[x]` | medium | **Validate QDCOUNT / opcode / QR** — reply FORMERR to `QDCOUNT≠1`, NOTIMP to `opcode≠0`, drop `QR=1` |
-| S3.5 | `[ ]` | low | Misaligned `i64` stores in `write_answer` — use byte stores (see invariant I6) |
+| S3.5 | `[x]` | low | Misaligned `i64` stores in `write_answer` — use byte stores (see invariant I6) |
 | S3.6 | `[ ]` | low | `sinkhole`'s 512-byte cap vs the 4096 buffer; rename the inverted `%want_answer` |
 
 ---
