@@ -294,7 +294,7 @@ reproduce.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
-| S3.1 | `[ ]` | medium | **NODATA reply is malformed** — ARCOUNT=0 but the client's OPT is still appended; `dig` reports *"Message has N extra bytes at end"* |
+| S3.1 | `[x]` | medium | **NODATA reply is malformed** — ARCOUNT=0 but the client's OPT is still appended; `dig` reports *"Message has N extra bytes at end"* |
 | S3.2 | `[ ]` | medium | **Question section not length-checked** — TYPE/CLASS fabricated from stale buffer bytes when absent |
 | S3.3 | `[ ]` | medium | **Truncated-record handling** — when TC is set the relayed packet still claims records it does not contain; drop the incomplete tail and fix the counts |
 | S3.4 | `[~]` | medium | **Validate QDCOUNT / opcode / QR** — reply FORMERR to `QDCOUNT≠1`, NOTIMP to `opcode≠0`, drop `QR=1` |

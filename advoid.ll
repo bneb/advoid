@@ -898,8 +898,11 @@ malformed:
     br label %done
 
 done:
+    ; NODATA and the answer path both end at the question section. Returning the
+    ; original request length instead re-sent the client's OPT record while
+    ; ARCOUNT was 0, leaving trailing bytes that strict parsers reject.
     %out_len = phi i64 [ %ans_len2, %answer_addr ],
-                        [ %len, %answer_nodata ],
+                        [ %q_end, %answer_nodata ],
                         [ %len, %malformed ]
     ret i64 %out_len
 }

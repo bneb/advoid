@@ -353,6 +353,24 @@ def main():
               f"rcode={struct.unpack('!H', r[2:4])[0] & 0xF}" if r else "dropped")
 
         # ---------------------------------------------------------------------
+        # A NODATA reply sets ARCOUNT=0 but was still sending the client's OPT
+        # record, so the message carried trailing bytes strict parsers reject.
+        qn2 = qwire("doubleclick.net")
+        opt_rr = b"\x00" + struct.pack("!HHIH", 41, 4096, 0, 0)
+        r = udp_query(port, header(txid=0x0D0D, ar=1) + qn2
+                      + struct.pack("!HH", 16, 1) + opt_rr)
+        if r is None:
+            check(False, "NODATA reply to an OPT-bearing query", "no reply")
+        else:
+            arc = struct.unpack("!H", r[10:12])[0]
+            i = 12
+            while i < len(r) and r[i] != 0:
+                i += 1 + r[i]
+            qend = i + 1 + 4      # question ends after QTYPE/QCLASS
+            check(arc == 0, "NODATA reply reports ARCOUNT=0", f"arcount={arc}")
+            check(len(r) == qend, "NODATA reply has no trailing OPT bytes",
+                  f"len={len(r)} expected={qend}")
+
         print("\n### a reply must go only to the client that asked")
         # The state table is keyed by transaction ID alone. Two queries in flight
         # with the same 16-bit ID collide, and without question validation one
