@@ -252,6 +252,45 @@ do_udp:
     br i1 %udp_err, label %check_tcp, label %classify_udp
 
 classify_udp:
+    ; Reject packets that are not well-formed QUERYs before doing any work.
+    ;   QR=1        this is a response; answering invites a packet loop
+    ;   opcode!=0   UPDATE/NOTIFY/etc are not ours to answer -> NOTIMP (rcode 4)
+    ;   QDCOUNT!=1  we answer one question, so anything else is FORMERR (rcode 1)
+    ; Built inline rather than in a helper: the helper version had to reach the
+    ; socket and client address from outside main and got that plumbing wrong twice.
+    %cf0 = getelementptr inbounds i8, ptr @udp_pkt, i64 2
+    %c0 = load i8, ptr %cf0
+    %cf1 = getelementptr inbounds i8, ptr @udp_pkt, i64 3
+    %c1 = load i8, ptr %cf1
+    %c0x = zext i8 %c0 to i64
+    %c1x = zext i8 %c1 to i64
+    %c0s = shl i64 %c0x, 8
+    %hflags = or i64 %c0s, %c1x
+
+    ; QR bit 0x8000
+    %qr = and i64 %hflags, 32768
+    %is_resp = icmp ne i64 %qr, 0
+    br i1 %is_resp, label %drop_udp, label %chk_op
+
+chk_op:
+    %ob = and i64 %hflags, 30720
+    %opc = lshr i64 %ob, 11
+    %op_bad = icmp ne i64 %opc, 0
+    br i1 %op_bad, label %send_notimp, label %chk_qd
+
+chk_qd:
+    %q4 = getelementptr inbounds i8, ptr @udp_pkt, i64 4
+    %q4v = load i8, ptr %q4
+    %q5 = getelementptr inbounds i8, ptr @udp_pkt, i64 5
+    %q5v = load i8, ptr %q5
+    %q4x = zext i8 %q4v to i64
+    %q5x = zext i8 %q5v to i64
+    %q4s = shl i64 %q4x, 8
+    %qd = or i64 %q4s, %q5x
+    %qd_bad = icmp ne i64 %qd, 1
+    br i1 %qd_bad, label %send_formerr, label %classify_ok
+
+classify_ok:
     %uhash = call i64 @hash_qname(ptr @udp_pkt, i64 %bytes)
     %ublocked = call i1 @is_blocked(i64 %uhash)
     br i1 %ublocked, label %blocked_udp, label %ulocal
@@ -456,6 +495,19 @@ tcp_done:
     br label %check_up
 
     ; --- Upstream UDP reply ---------------------------------------------
+send_notimp:
+    call void @make_error(ptr @udp_pkt, i64 4)
+    %rs1 = call i64 @sendto(i32 %udp_sock, ptr @udp_pkt, i64 12, i32 0, ptr %client_addr, i32 16)
+    br label %check_tcp
+
+send_formerr:
+    call void @make_error(ptr @udp_pkt, i64 1)
+    %rs2 = call i64 @sendto(i32 %udp_sock, ptr @udp_pkt, i64 12, i32 0, ptr %client_addr, i32 16)
+    br label %check_tcp
+
+drop_udp:
+    br label %check_tcp
+
 check_up:
     %has_up = icmp ne i64 %r2_in, 0
     br i1 %has_up, label %do_up, label %poll_loop
@@ -1002,6 +1054,25 @@ write_rdata_hi:
     br label %done
 
 done:
+    ret void
+}
+
+; make_error rewrites a 12-byte header in place: echo the transaction ID, set
+; QR=1 RD=1 RA=1 with the given rcode, and zero the counts. It touches only the
+; header, so it needs no socket or client address plumbing.
+define void @make_error(ptr %buf, i64 %rcode) {
+entry:
+    ; FLAGS = 0x8180 | rcode, emitted a byte at a time (big-endian).
+    %f2 = getelementptr inbounds i8, ptr %buf, i64 2
+    store i8 129, ptr %f2
+    %f3 = getelementptr inbounds i8, ptr %buf, i64 3
+    %rc = trunc i64 %rcode to i8
+    store i8 %rc, ptr %f3
+    ; zero QDCOUNT..ARCOUNT (bytes 4..11)
+    %z = getelementptr inbounds i8, ptr %buf, i64 4
+    store i32 0, ptr %z
+    %z2 = getelementptr inbounds i8, ptr %buf, i64 8
+    store i32 0, ptr %z2
     ret void
 }
 

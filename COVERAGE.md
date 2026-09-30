@@ -49,7 +49,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 13 | `@tcp_pending` leaks and disables TCP | reviewer | **no** | S1.2 |
 | 14 | NODATA reply carries the client's OPT | reviewer | **yes** | suite: *NODATA reply has no trailing OPT bytes* |
 | 15 | Missing QTYPE/CLASS answered from stale bytes | reviewer | **yes** | suite: *truncated question yields no answer invented from stale bytes* |
-| 16 | No QR/opcode/QDCOUNT validation | reviewer | **no** | S3.4 |
+| 16 | No QR/opcode/QDCOUNT validation | reviewer | **yes** | suite: *malformed query headers are rejected, not answered* |
 
 **6 of 16 covered.** The uncovered ones are precisely the open roadmap items —
 which is the point: the audit and the roadmap are the same list, seen from the
