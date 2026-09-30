@@ -30,6 +30,9 @@ ALLOW = {
     ("i32", "%t_a4"):      "sin_addr: written little-endian on purpose (0x0100007F == 127.0.0.1)",
     ("i32", "%client_len"): "socklen_t for recvfrom: host order, not a wire field",
     ("i32", "%nosig"):     "int option value for setsockopt: host order",
+    ("i64", "%tw_need"):   "local TCP-wait state: host order, never on the wire",
+    ("i64", "%p0v"):       "local pollfd scratch: host order, never on the wire",
+    ("i64", "%p1v"):       "local pollfd scratch: host order, never on the wire",
 }
 
 
@@ -43,6 +46,8 @@ def lint(path):
         m = GEPS.search(line.rstrip())
         if m:
             idx = int(m.group(1))
+            if idx == 0:
+                continue  # indexing 0 is the base address either way
             findings.append(
                 (lineno, "gep-one-index",
                  f"getelementptr into an array type with a single index {idx}: "
@@ -60,9 +65,8 @@ def lint(path):
             findings.append(
                 (lineno, "wire-endianness",
                  f"store i{width} of the literal {value} into {ptr}: DNS fields are "
-                 f"big-endian, and an i{width} store emits the host's byte order. "
-                 f"Write the bytes individually (store_be16 / store_be32) or two "
-                 f"i8 stores."))
+                 f"big-endian, and a store of width i{width} emits the host's "
+                 f"byte order. Write the bytes individually."))
 
     return findings
 
