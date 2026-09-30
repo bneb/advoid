@@ -154,12 +154,23 @@ in most cases by anything on the LAN that can reach the port.
      missed it), and the *known-good* build failed to bind identically. Lesson: before
      blaming the code, confirm the port is actually free — `lsof` is unreliable here,
      but a Python `bind()` attempt is not.
-  2. With the port genuinely free, the restored implementation scores **4/8** on the
-     hostile suite: the trickle case now passes, but the idle-65534-declaration and
-     four-concurrent-stalls cases still fail, and abrupt-disconnect recovery
-     regressed (the engine is alive but the follow-up UDP query goes unanswered).
-     So the loop is partially right and not yet correct. Source kept at
-     `/tmp/v2/impl_backup.ll` for the next attempt.
+  2. With the port genuinely free, the restored implementation scored **4/8** on the
+     hostile suite. Round 9 found why: the pollfd word was written twice — the fd,
+     then `store i64 4294967296` for the events — so the second store clobbered the
+     fd and `poll()` was watching **stdin**, not the connection. That single bug
+     explains all three failures. Fixed by building the whole 8-byte word
+     (`fd | POLLIN<<32`) and storing it once.
+  3. With that fix the hostile suite goes **4/8 -> 8/10**: the trickle, idle-65534
+     and bind-diagnostic checks all pass. **But the behaviour suite regresses to
+     29/31** — "TCP relay answers on a fresh engine" and "TCP allowed domain is
+     relayed upstream" now fail, which the blocking version passed. So the wait loop
+     now watches the socket properly but the frame-completion/relay path is not yet
+     correct.
+  4. **Not committed.** Candidate preserved at
+     `/tmp/v2/candidate_pollfd_fixed.ll` (+ `.eng`), which is strictly further
+     along than anything previously attempted: 8/10 hostile with a diagnosed root
+     cause. The next attempt should start from this file and fix the completion
+     path, not re-derive the pollfd setup.
 - **A separate, confirmed bug found while diagnosing this:** `fatal_port` prints
   garbage for any port >= 1000. The three-digit branch does `udiv(h_d, 1)` where it
   means `urem(h_d, 10)`, so 5333 renders as `e33`. Every startup-failure message for
