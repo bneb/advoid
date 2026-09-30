@@ -39,6 +39,10 @@ green from red.
 
 ### Verification
 
+Coverage is audited in [`COVERAGE.md`](COVERAGE.md): measured numbers, the gaps
+stated plainly, and a failure-mode table of which defects still lack a regression
+test. Six of sixteen are covered; the rest map onto open items below.
+
 ```bash
 ./verify.sh            # static checks + behaviour suite   (~2 min)
 ./verify.sh --static   # static only                       (seconds)
@@ -56,7 +60,8 @@ An item is done when **all** of these hold:
 2. `./verify.sh` is green.
 3. A test exists that **fails without the change** (a regression test, not just a
    passing suite). If a change cannot be tested, say so in Notes — do not mark it
-   done on inspection alone.
+   done on inspection alone. `COVERAGE.md` audits which failure modes still lack
+   one; items marked `Covered? no` there must add it as part of the fix.
 4. `CHANGELOG.md` records the change under `Unreleased`.
 
 ### Invariants — do not regress these

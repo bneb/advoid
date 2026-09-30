@@ -33,6 +33,11 @@ static() {
   run "ir-lint (byte order, GEP)"   python3 tools/ir_lint.py advoid.ll
   run "go vet"                     go vet ./...
   run "go tests"                   go test ./...
+  # Coverage is a floor, not a goal. It is here so coverage cannot silently
+  # regress; the number that matters is the failure-mode audit in ROADMAP.md.
+  COV="$(go test -cover ./... 2>/dev/null | grep -oE 'coverage: [0-9.]+' | grep -oE '[0-9.]+' || echo 0)"
+  if awk "BEGIN{exit !($COV >= 70)}"; then ok "go coverage ${COV}% (floor 70%)"
+  else bad "go coverage ${COV}% is below the 70% floor"; fi
   run "swift typecheck"            swiftc -typecheck -module-cache-path "$WORK/mc" advoid-menu.swift
   run "install.sh syntax"          bash -n install.sh
   run "uninstall.sh syntax"        bash -n uninstall.sh
