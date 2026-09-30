@@ -205,6 +205,20 @@ def main():
             return 1
         print(f"engine pid={proc.pid} listening on port {port}\n")
 
+        # MUST be the first check in this suite. The GEP bug in set_io_timeout
+        # corrupts a stack slot; whether it matters depends on what the engine has
+        # already done. A prior TCP connection makes the bug invisible, so a check
+        # placed later passes against a broken build.
+        print("\n### TCP relay works as the first upstream query of a fresh engine")
+        # Must run before any other upstream traffic in this process.
+        first = tcp_query(port, header(txid=0x0F1A) + qwire("example.com")
+                          + struct.pack("!HH", 1, 1), timeout=10.0)
+        first_parsed = parse_response(first) if first else None
+        check(first_parsed is not None and len(first_parsed["answers"]) > 0,
+              "TCP relay answers on a fresh engine, with no prior UDP traffic",
+              f"{len(first) if first else 0} bytes")
+
+
         print("### blocked-domain answers are typed to match the query")
         for qtype, want_type, want_rdlen, label in (
             (1, 1, 4, "A"),
@@ -268,15 +282,6 @@ def main():
         parsed = parse_response(data) if data else None
         check(parsed is not None and len(parsed["answers"]) > 0,
               "TCP allowed domain is relayed upstream")
-
-        print("\n### TCP relay works as the first upstream query of a fresh engine")
-        # Must run before any other upstream traffic in this process.
-        first = tcp_query(port, header(txid=0x0F1A) + qwire("example.com")
-                          + struct.pack("!HH", 1, 1), timeout=10.0)
-        first_parsed = parse_response(first) if first else None
-        check(first_parsed is not None and len(first_parsed["answers"]) > 0,
-              "TCP relay answers on a fresh engine, with no prior UDP traffic",
-              f"{len(first) if first else 0} bytes")
 
         print("\n### truncation is signalled so clients can retry over TCP")
         data = udp_query(port, header() + qwire("org") + struct.pack("!HH", 48, 1))
