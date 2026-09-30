@@ -29,7 +29,6 @@ OWNED_BY_OPEN_ITEM = {
     "UDP query answered while a TCP client declares 65534 bytes": "S1.1",
     "and answered promptly, not after a long stall": "S1.1",
     "UDP unaffected with four stalled TCP clients": "S1.1",
-    "upstream UDP socket is connected to 1.1.1.1:53": "S2.2",
 }
 OPEN_ITEM = set(OWNED_BY_OPEN_ITEM.values())
 
@@ -217,7 +216,8 @@ def main():
                               capture_output=True, text=True).stdout
         upstream = [l.split()[-1] for l in lsof.splitlines()
                     if "UDP" in l and "127.0.0.1" not in l]
-        connected = [u for u in upstream if u.startswith("1.1.1.1:53")]
+        # lsof renders a connected socket as "local->remote".
+        connected = [u for u in upstream if "->1.1.1.1:53" in u]
         unconnected = [u for u in upstream if u in ("*:*", "*.*")]
         check(bool(connected),
               "upstream UDP socket is connected to 1.1.1.1:53",

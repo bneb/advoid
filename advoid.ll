@@ -25,6 +25,7 @@ declare i32 @bind(i32, ptr, i32)
 declare i32 @setsockopt(i32, i32, i32, ptr, i32)
 declare i32 @listen(i32, i32)
 declare i32 @accept(i32, ptr, ptr)
+declare i32 @connect(i32, ptr, i32)
 declare i64 @recvfrom(i32, ptr, i64, i32, ptr, ptr)
 declare i64 @sendto(i32, ptr, i64, i32, ptr, i32)
 declare i64 @recv(i32, ptr, i64, i32)
@@ -192,7 +193,17 @@ upstream_addr:
     %up_ip3 = getelementptr inbounds i8, ptr %up_addr, i64 7
     store i8 1, ptr %up_ip3
 
+    ; Connect the upstream socket to the resolver. A connected UDP socket makes the
+    ; kernel drop every datagram not from that peer, so no other local process can
+    ; inject a forged answer into a pending query. UDP connect() never blocks.
+    ; Consequence on Darwin: the forwarding path must use send(), not sendto() with
+    ; a destination, which returns EISCONN (56) on a connected socket.
+    %upcon = call i32 @connect(i32 %up_sock, ptr %up_addr, i32 16)
+    %upcon_bad = icmp slt i32 %upcon, 0
+    br i1 %upcon_bad, label %socket_fail, label %pollfds_setup
+
     ; --- 4. pollfd array: UDP listener, TCP listener, upstream UDP -------
+pollfds_setup:
     %pollfds = alloca [3 x i64], align 8
     %p0_ptr = getelementptr inbounds [3 x i64], ptr %pollfds, i64 0, i64 0
     %udp_fd = zext i32 %udp_sock to i64
@@ -325,7 +336,9 @@ forward_udp:
     %qst = getelementptr inbounds [65536 x i64], ptr @state_qhash, i64 0, i64 %txid
     store i64 %quh, ptr %qst
     %fsz = trunc i64 %bytes to i32
-    %sent = call i64 @sendto(i32 %up_sock, ptr @udp_pkt, i64 %bytes, i32 0, ptr %up_addr, i32 16)
+    ; upstream socket is connected, so send() not sendto(): Darwin returns
+    ; EISCONN if a destination is supplied to a connected socket.
+    %sent = call i64 @send(i32 %up_sock, ptr @udp_pkt, i64 %bytes, i32 0)
     %fsent_bad = icmp slt i64 %sent, 0
     br i1 %fsent_bad, label %check_tcp, label %count_forward
 
@@ -465,12 +478,12 @@ forward_tcp_send_edns:
     store i8 0, ptr %arc10
     store i8 1, ptr %arc11
     %elen = add i64 %msglen, 11
-    %esent = call i64 @sendto(i32 %up_sock, ptr @tcp_tx, i64 %elen, i32 0, ptr %up_addr, i32 16)
+    %esent = call i64 @send(i32 %up_sock, ptr @tcp_tx, i64 %elen, i32 0)
     %ebad = icmp slt i64 %esent, 0
     br i1 %ebad, label %forward_tcp_abandon, label %forward_tcp_count
 
 forward_tcp_send_plain:
-    %tsent = call i64 @sendto(i32 %up_sock, ptr @tcp_tx, i64 %msglen, i32 0, ptr %up_addr, i32 16)
+    %tsent = call i64 @send(i32 %up_sock, ptr @tcp_tx, i64 %msglen, i32 0)
     %tsent_bad = icmp slt i64 %tsent, 0
     br i1 %tsent_bad, label %forward_tcp_abandon, label %forward_tcp_count
 
