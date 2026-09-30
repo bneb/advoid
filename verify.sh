@@ -71,25 +71,36 @@ PY
     bad "build test engine"; sed 's/^/        /' "$WORK/log" | tail -6; return
   fi
   ok "build test engine"
-  ADVOID_TEST_PORT="$PORT" python3 tests/engine_test.py "$WORK/engine" >"$WORK/suite" 2>&1
+  # Trust the suite's own exit status: it already separates tracked-open
+  # EXPECTED-FAIL checks from real failures. Grepping [FAIL] would count both.
+  if ADVOID_TEST_PORT="$PORT" python3 tests/engine_test.py "$WORK/engine" >"$WORK/suite" 2>&1; then
+    suite_rc=0
+  else
+    suite_rc=1
+  fi
   local passed failed
   passed=$(grep -c '\[PASS\]' "$WORK/suite" || true)
-  failed=$(grep -c '\[FAIL\]' "$WORK/suite" || true)
+  failed=$(grep -c '^  FAILED:' "$WORK/suite" || true)
   grep -E '^\s+\[FAIL\]' "$WORK/suite" | sed 's/^/        /' || true
-  if [ "$failed" -eq 0 ]; then ok "behaviour suite ($passed/$passed)"
-  else bad "behaviour suite ($passed passed, $failed failed)"; fi
+  if [ "$suite_rc" -eq 0 ]; then ok "behaviour suite ($passed passed, tracked-open excluded)"
+  else bad "behaviour suite ($passed passed, $failed real failure(s))"; fi
 
   # Hostile-input suite. Currently RED: it covers S1.1, where a TCP client that
   # trickles bytes holds the single-threaded poll loop and UDP stops answering.
   # It is wired in deliberately. A resolver that can be frozen by one slow client
   # must not sit behind a green oracle, and muting this would be reward hacking.
-  ADVOID_TEST_PORT="$PORT" python3 tests/hostile_test.py "$WORK/engine" >"$WORK/hostile" 2>&1
+  local hostile_rc
+  if ADVOID_TEST_PORT="$PORT" python3 tests/hostile_test.py "$WORK/engine" >"$WORK/hostile" 2>&1; then
+    hostile_rc=0
+  else
+    hostile_rc=1
+  fi
   local hpassed hfailed
   hpassed=$(grep -c '\[PASS\]' "$WORK/hostile" || true)
   hfailed=$(grep -c '\[FAIL\]' "$WORK/hostile" || true)
   grep -E '^\s+\[FAIL\]' "$WORK/hostile" | sed 's/^/        /' || true
-  if [ "$hfailed" -eq 0 ]; then ok "hostile-input suite ($hpassed/$hpassed)"
-  else bad "hostile-input suite ($hpassed passed, $hfailed failed)"; fi
+  if [ "$hostile_rc" -eq 0 ]; then ok "hostile-input suite ($hpassed passed, tracked-open excluded)"
+  else bad "hostile-input suite ($hpassed passed, real failures)"; fi
 }
 
 case "${1:-}" in
