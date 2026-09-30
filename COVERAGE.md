@@ -10,6 +10,7 @@ produce tests that assert nothing. This records what is measured, what is not, a
 |---|---|---|---|---|
 | Go compiler | `go test -cover` | **73.8%** | floor 70% in `verify.sh` | Covers hashing, parsing, safelist, collision detection, IR emission, local-blocklist generation |
 | Behaviour suite | `tests/engine_test.py` | **32 checks** | must be all green | End-to-end over real sockets against the built engine |
+| Hostile-input suite | `tests/hostile_test.py` | **8 checks** | **currently 4/8 — red** | Slow-loris, concurrent stalls, SIGPIPE, LAN exposure. Red because S1.1 is open |
 | IR static lint | `tools/ir_lint.py` | — | wired into `verify.sh` | Byte-order and `getelementptr` shapes |
 
 ### Known coverage gaps, stated plainly
@@ -43,7 +44,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 9 | Answers > 4096 unreachable via TCP | reviewer | yes | suite: *TCP retry resolves the truncated query* |
 | 10 | State table keyed on txid alone | reviewer | **no** | S2.1 — two clients, same txid |
 | 11 | Forged upstream reply relayed | reviewer | **no** | S2.2 — inject a datagram with a matching txid |
-| 12 | Slow-loris stalls the whole resolver | reviewer | **no** | S1.1 — trickle bytes, assert UDP unaffected |
+| 12 | Slow-loris stalls the whole resolver | reviewer | **yes** | `tests/hostile_test.py` — proven failing against the current build |
 | 13 | `@tcp_pending` leaks and disables TCP | reviewer | **no** | S1.2 |
 | 14 | NODATA reply carries the client's OPT | reviewer | **no** | S3.1 |
 | 15 | Missing QTYPE/CLASS answered from stale bytes | reviewer | **no** | S3.2 |

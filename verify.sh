@@ -76,6 +76,18 @@ PY
   grep -E '^\s+\[FAIL\]' "$WORK/suite" | sed 's/^/        /' || true
   if [ "$failed" -eq 0 ]; then ok "behaviour suite ($passed/$passed)"
   else bad "behaviour suite ($passed passed, $failed failed)"; fi
+
+  # Hostile-input suite. Currently RED: it covers S1.1, where a TCP client that
+  # trickles bytes holds the single-threaded poll loop and UDP stops answering.
+  # It is wired in deliberately. A resolver that can be frozen by one slow client
+  # must not sit behind a green oracle, and muting this would be reward hacking.
+  ADVOID_TEST_PORT="$PORT" python3 tests/hostile_test.py "$WORK/engine" >"$WORK/hostile" 2>&1
+  local hpassed hfailed
+  hpassed=$(grep -c '\[PASS\]' "$WORK/hostile" || true)
+  hfailed=$(grep -c '\[FAIL\]' "$WORK/hostile" || true)
+  grep -E '^\s+\[FAIL\]' "$WORK/hostile" | sed 's/^/        /' || true
+  if [ "$hfailed" -eq 0 ]; then ok "hostile-input suite ($hpassed/$hpassed)"
+  else bad "hostile-input suite ($hpassed passed, $hfailed failed)"; fi
 }
 
 case "${1:-}" in

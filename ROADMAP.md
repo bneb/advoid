@@ -109,7 +109,7 @@ in most cases by anything on the LAN that can reach the port.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
-| **S1.1** | `[ ]` | blocker | **Non-blocking TCP handling.** See details below |
+| **S1.1** | `[~]` | blocker | **Non-blocking TCP handling.** See details below |
 | S1.2 | `[ ]` | high | `@tcp_pending` leaks — reclaim abandoned relays with a deadline and close the fd |
 | S1.3 | `[ ]` | medium | `poll()` result and error flags ignored — check `POLLERR`/`POLLHUP`/`POLLNVAL`, handle `poll() == -1` |
 | S1.4 | `[ ]` | medium | `state_addrs` entries are never expired — add a timestamp and reclaim |
@@ -134,8 +134,19 @@ in most cases by anything on the LAN that can reach the port.
   deadline). Do **not** use a blocking read on the poll thread. A worker process
   is acceptable if it is simpler, but it must not share the `poll()` loop's fd
   table with the parent.
-- **Verify:** `./verify.sh` plus the new hostile-input tests.
-- **Files:** `advoid.ll`, `tests/engine_test.py`
+- **Verify:** `./verify.sh` plus `tests/hostile_test.py`. **The failing test now
+  exists and is proven red** against the current build: 4 of 8 hostile checks fail
+  (trickle, idle-huge-declaration ×2, four concurrent stalls). It is wired into
+  `verify.sh`, so the oracle is red until this lands. Design note: the two SIGPIPE
+  and loopback-bind checks in the same file already pass, so the suite is not
+  simply failing wholesale.
+- **Not started:** the implementation. It needs the poll loop to stop servicing a
+  connection to completion — accept, then return to `poll()` with the connection
+  tracked (bytes wanted, bytes received, absolute deadline) until the frame
+  completes. A single bounded blocking read would fix the "declares 65534 and
+  sends nothing" case but would still delay UDP for the whole wait, so it does not
+  meet the first and third criteria.
+- **Files:** `advoid.ll`, `tests/engine_test.py`, `tests/hostile_test.py`
 
 ---
 
