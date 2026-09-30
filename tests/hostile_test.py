@@ -191,6 +191,31 @@ def main():
             finally:
                 s.close()
 
+        # ---------------------------------------------------------------------
+        print("\n### a bind failure must name the port it tried")
+        # This diagnostic is read exactly when something is already wrong, so it
+        # has to be trustworthy. It once printed "e33" for 5333 and made a port
+        # conflict look like a code defect.
+        port_str = str(PORT)
+        second = subprocess.Popen([engine], stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+        try:
+            out, _ = second.communicate(timeout=10)
+            text = out.decode(errors="replace")
+            check(second.returncode not in (0, None),
+                  "second instance exits non-zero on bind conflict",
+                  f"rc={second.returncode}")
+            # Anchor on the error line specifically: the port also appears in the
+            # startup banner, so a bare substring check passes even when the
+            # formatter is broken.
+            want = f"port {port_str}"
+            check(want in text,
+                  f"bind-failure line names the actual port ({want})",
+                  "message was: " + " ".join(text.split())[-90:])
+        except subprocess.TimeoutExpired:
+            second.kill()
+            check(False, "second instance exits on bind conflict", "timed out")
+
         check(proc.poll() is None, "engine still alive at the end")
     finally:
         proc.terminate()

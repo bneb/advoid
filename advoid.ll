@@ -123,7 +123,8 @@ udp_addr:
     br i1 %ubind_bad, label %bind_fail_udp, label %tcp_listen
 
 bind_fail_udp:
-    call void @fatal_port(ptr @err_bind_udp, i64 33)
+    %lp32 = zext i16 %lp to i64
+    call void @fatal_port(ptr @err_bind_udp, i64 33, i64 %lp32)
     unreachable
 
     ; --- 2. TCP listener (RFC 1035 4.2.1 fallback path) ------------------
@@ -150,7 +151,8 @@ tcp_addr:
     br i1 %tbind_bad, label %bind_fail_tcp, label %tcp_do_listen
 
 bind_fail_tcp:
-    call void @fatal_port(ptr @err_bind_tcp, i64 33)
+    %lp32t = zext i16 %lp to i64
+    call void @fatal_port(ptr @err_bind_tcp, i64 33, i64 %lp32t)
     unreachable
 
 tcp_do_listen:
@@ -560,57 +562,24 @@ entry:
 ; fatal_port reports a bind conflict naming the actual port, then exits.
 ; A conflict here used to be invisible: the engine ignored bind()'s result and
 ; polled unbound sockets forever while the UI still showed the shield as active.
-define void @fatal_port(ptr %m, i64 %len) {
+define void @fatal_port(ptr %m, i64 %len, i64 %port) {
 entry:
     ; Flush stdout first so the startup banner is not lost. launchd captures both
     ; streams, and a missing banner makes a startup failure much harder to read.
     %fl = call i32 @fflush(ptr null)
     %w1 = call i64 @write(i32 2, ptr %m, i64 %len)
-    %pv = load i16, ptr @local_port
-    %pv16 = add i16 %pv, 0
-    %ge100 = icmp uge i16 %pv16, 100
-    br i1 %ge100, label %three, label %two
-
-two:
-    ; 10..99: tens then units
-    %t_d = udiv i16 %pv16, 10
-    %t_c = add i16 %t_d, 48
-    %t_b = trunc i16 %t_c to i8
-    store i8 %t_b, ptr @digit_buf
-    %u_d = urem i16 %pv16, 10
-    %u_c = add i16 %u_d, 48
-    %u_b = trunc i16 %u_c to i8
-    %p1 = getelementptr inbounds i8, ptr @digit_buf, i64 1
-    store i8 %u_b, ptr %p1
-    %p2 = getelementptr inbounds i8, ptr @digit_buf, i64 2
-    store i8 41, ptr %p2
-    %p3 = getelementptr inbounds i8, ptr @digit_buf, i64 3
-    store i8 10, ptr %p3
-    %n2 = call i64 @write(i32 2, ptr @digit_buf, i64 4)
-    br label %out
-
-three:
-    ; 100..65535: hundreds, tens, units
-    %h_d = udiv i16 %pv16, 100
-    %h_c = add i16 %h_d, 48
-    %h_b = trunc i16 %h_c to i8
-    store i8 %h_b, ptr @digit_buf
-    %r1 = urem i16 %pv16, 100
-    %t2_d = udiv i16 %r1, 10
-    %t2_c = add i16 %t2_d, 48
-    %t2_b = trunc i16 %t2_c to i8
-    %q1 = getelementptr inbounds i8, ptr @digit_buf, i64 1
-    store i8 %t2_b, ptr %q1
-    %u2_d = urem i16 %r1, 10
-    %u2_c = add i16 %u2_d, 48
-    %u2_b = trunc i16 %u2_c to i8
-    %q2 = getelementptr inbounds i8, ptr @digit_buf, i64 2
-    store i8 %u2_b, ptr %q2
-    %q3 = getelementptr inbounds i8, ptr @digit_buf, i64 3
-    store i8 41, ptr %q3
-    %q4 = getelementptr inbounds i8, ptr @digit_buf, i64 4
-    store i8 10, ptr %q4
-    %n3 = call i64 @write(i32 2, ptr @digit_buf, i64 5)
+    ; Render the port with the shared decimal helper. The previous hand-rolled
+    ; version assumed at most three digits and emitted pv/100 as one character, so
+    ; 5333 printed as "e33" -- which made this diagnostic unreadable exactly when
+    ; it was needed most.
+    %buf = alloca [24 x i8], align 8
+    %nd = call i64 @u64_to_ascii(ptr %buf, i64 %port)
+    %pc = getelementptr inbounds i8, ptr %buf, i64 %nd
+    store i8 41, ptr %pc                       ; ')'
+    %p1 = getelementptr inbounds i8, ptr %pc, i64 1
+    store i8 10, ptr %p1                       ; newline
+    %tot = add i64 %nd, 2
+    %w2 = call i64 @write(i32 2, ptr %buf, i64 %tot)
     br label %out
 
 out:
