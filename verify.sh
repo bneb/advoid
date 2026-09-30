@@ -20,6 +20,31 @@ SDK="$(xcrun --show-sdk-path 2>/dev/null || true)"
 
 PORT="${ADVOID_TEST_PORT:-5333}"
 WORK="$(mktemp -d /tmp/advoid-verify.XXXXXX)"
+
+# Fail fast if a leftover test engine still holds the port. Otherwise the suites
+# report a scatter of confusing "0 bytes" failures that look exactly like engine
+# regressions. This trap has cost four rounds of misdiagnosis; `lsof` is not
+# reliable inside the sandbox, so probe the port directly.
+port_free() {
+  python3 - "$1" <<'PYEOF'
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PYEOF
+}
+
+if ! port_free "$PORT"; then
+  holder="$(lsof -nP -iUDP:"$PORT" 2>/dev/null | awk 'NR>1 {print $1" (pid "$2")"}' | head -1)"
+  echo "ABORT: UDP port $PORT is already in use${holder:+ -- held by $holder}."
+  echo "       A leftover test engine from an earlier run is the usual cause; kill it and retry."
+  echo "       'lsof' may not see it inside a sandbox; try: pkill -9 -f 'advoid.*eng'"
+  exit 2
+fi
 trap 'rm -rf "$WORK"' EXIT
 
 fails=0

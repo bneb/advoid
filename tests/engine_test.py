@@ -133,11 +133,33 @@ def find_listening_port(proc):
 
     A UDP query is the final arbiter: only the engine answers DNS on this socket.
     """
+    probe = header() + qwire("doubleclick.net") + struct.pack("!HH", 1, 1)
+
+    def answers_dns(port, timeout=0.4):
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.settimeout(timeout)
+        try:
+            sk.sendto(probe, ("127.0.0.1", port))
+            sk.recvfrom(65535)
+            return True
+        except OSError:
+            return False
+        finally:
+            sk.close()
+
     override = os.environ.get("ADVOID_TEST_PORT")
     if override:
-        return int(override)
-
-    probe = header() + qwire("doubleclick.net") + struct.pack("!HH", 1, 1)
+        port = int(override)
+        # The override tells us WHERE to look, not that the engine is already up.
+        # Returning it unchecked was the cause of the flaky suite: the first checks
+        # fired before bind() completed and read as "0 bytes", indistinguishable
+        # from an engine regression.
+        for _ in range(60):
+            if answers_dns(port):
+                return port
+            time.sleep(0.1)
+        print(f"engine never answered a DNS query on {port} within 6s")
+        return None
 
     candidates = []
     try:

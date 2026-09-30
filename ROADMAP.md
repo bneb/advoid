@@ -380,7 +380,7 @@ the right sprint when you pick it up.
 | ID | Status | Sev | Item |
 |---|---|---|---|
 | B2 | `[x]` | medium | **`fatal_port` mis-prints ports >= 1000 — fixed.** The three-digit branch did `udiv(h_d, 1)` instead of `urem(h_d, 10)`, so 5333 rendered as `e33`. Replaced the hand-rolled formatter with the existing `u64_to_ascii`, which handles any width. Guarded by a hostile-suite check that asserts the *error line* names the port (a bare substring check passed against the broken build, because the port also appears in the banner). |
-| B1 | `[ ]` | high | **Oracle determinism.** `the TCP retry resolves the truncated query` flips between pass and fail across identical runs. Until the cause is known, `verify.sh` cannot gate a Definition of Done. Likely related to S2.1 (txid-keyed state table) — the same misdelivery that S2.1 describes would also explain a TCP retry sometimes receiving the upstream's 21-byte truncated answer and sometimes the full one. Investigate alongside S2.1. |
+| B1 | `[x]` | high | **Oracle determinism.** `the TCP retry resolves the truncated query` flips between pass and fail across identical runs. Until the cause is known, `verify.sh` cannot gate a Definition of Done. Likely related to S2.1 (txid-keyed state table) — the same misdelivery that S2.1 describes would also explain a TCP retry sometimes receiving the upstream's 21-byte truncated answer and sometimes the full one. Investigate alongside S2.1. |
 
 ---
 
