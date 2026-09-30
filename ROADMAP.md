@@ -166,7 +166,12 @@ in most cases by anything on the LAN that can reach the port.
      relayed upstream" now fail, which the blocking version passed. So the wait loop
      now watches the socket properly but the frame-completion/relay path is not yet
      correct.
-  4. **Not committed.** Candidate preserved at
+  4. Round 10 tried a second suspected cause: `tcp_done` closed the socket without
+     clearing `tw_in`, which would leave `check_tcp` re-entering the wait loop on a
+     dead fd and stop accepting TCP queries. Clearing it changed **nothing** (29/31
+     and 8/10, identical), so that was not the cause either. The remaining
+     behaviour regression is still undiagnosed.
+  5. **Not committed.** Candidate preserved at
      `/tmp/v2/candidate_pollfd_fixed.ll` (+ `.eng`), which is strictly further
      along than anything previously attempted: 8/10 hostile with a diagnosed root
      cause. The next attempt should start from this file and fix the completion
