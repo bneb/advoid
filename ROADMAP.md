@@ -221,7 +221,7 @@ security issue: a local process can inject DNS answers today.
 | ID | Status | Sev | Item |
 |---|---|---|---|
 | **S2.1** | `[x]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
-| **S2.2** | `[ ]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
+| **S2.2** | `[~]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
 | **S2.3** | `[x]` | **blocker** | **GATING — done.** A TCP client has no 512-byte limit, so when forwarding such a query the engine now appends an OPT record advertising its own 4096-byte buffer; upstream then returns the full answer in one datagram instead of truncating, and the client's RFC 1035 4.2.1 TCP retry finally resolves. Confirmed upstream honours this (a hand-built `OPT(4096)` query returns 1028B, TC=0). The first attempt did not work because the 11 OPT bytes were written to `len+1 .. len+11` — the first byte was computed but never stored, so the record started one byte late and left byte `len` holding stale buffer content. **Verified:** `verify.sh` green, 4/4 consecutive runs, suite 32/32. **Still open:** answers above 4096 bytes still need a genuine TCP upstream fetch; this change raises the ceiling, it does not remove it (tracked in the Backlog) |
 | S2.4 | `[ ]` | low | Use a resolver-owned randomised upstream txid and map back to the client's |
 

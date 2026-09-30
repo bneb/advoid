@@ -206,6 +206,23 @@ def main():
                 s.close()
 
         # ---------------------------------------------------------------------
+        print("\n### the upstream socket must be connected to its resolver")
+        # Injecting a forged reply needs the ephemeral upstream port, which is not
+        # reliably discoverable. The structural fix is better tested directly: a
+        # CONNECTED UDP socket makes the kernel drop every datagram not from the
+        # configured peer, so forgery from another local process cannot happen at
+        # all. An unconnected socket shows as "*:*"; a connected one shows its peer.
+        lsof = subprocess.run(["lsof", "-nP", "-p", str(proc.pid)],
+                              capture_output=True, text=True).stdout
+        upstream = [l.split()[-1] for l in lsof.splitlines()
+                    if "UDP" in l and "127.0.0.1" not in l]
+        connected = [u for u in upstream if u.startswith("1.1.1.1:53")]
+        unconnected = [u for u in upstream if u in ("*:*", "*.*")]
+        check(bool(connected),
+              "upstream UDP socket is connected to 1.1.1.1:53",
+              f"seen {upstream} -- unconnected sockets accept datagrams from anyone")
+
+        # ---------------------------------------------------------------------
         print("\n### a bind failure must name the port it tried")
         # This diagnostic is read exactly when something is already wrong, so it
         # has to be trustworthy. It once printed "e33" for 5333 and made a port
