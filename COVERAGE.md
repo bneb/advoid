@@ -39,7 +39,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 2b | *(severity corrected: S1.1 is local-only after the loopback bind)* | this round | n/a | see ROADMAP S1.1 Notes |
 | 4 | SIGPIPE kills the resolver | reviewer | **no** | TCP query then RST; engine must survive |
 | 5 | `uninstall.sh` skips first network service | reviewer | **no** | run the pipeline, assert both services appear |
-| 6 | `set_io_timeout` GEP writes 128 bytes up | reviewer | yes | suite: *first upstream query of a fresh engine* + lint |
+| 6 | `set_io_timeout` GEP writes 128 bytes up | reviewer | yes | suite: *first upstream query of a fresh engine* + lint (9 evasion fixtures, run by `ir_lint_selftest.py`) |
 | 7 | Stack leak, 16 B per relayed reply | reviewer | **no** | assert SP is stable across many relays |
 | 8 | Test suite could not bind unprivileged | all | yes | `verify.sh` runs it with no sudo |
 | 9 | Answers > 4096 unreachable via TCP | reviewer | yes | suite: *TCP retry resolves the truncated query* |

@@ -31,6 +31,8 @@ static() {
   echo "── static ──────────────────────────────────────────────"
   run "advoid.ll assembles"        llvm-as advoid.ll -o /dev/null
   run "ir-lint (byte order, GEP)"   python3 tools/ir_lint.py advoid.ll
+  # Fixtures prove the lint still has teeth: each must be caught, the control clean.
+  run "ir-lint fixtures"            python3 tools/ir_lint_selftest.py
   run "go vet"                     go vet ./...
   run "go tests"                   go test ./...
   # Coverage is a floor, not a goal. It is here so coverage cannot silently

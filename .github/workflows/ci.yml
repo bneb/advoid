@@ -27,6 +27,10 @@ jobs:
       - name: Run blocklist compiler tests
         run: go test ./... -v
 
+      - name: Static checks and IR lint
+        # Same oracle the autonomous loop gates on, so CI and the loop cannot drift.
+        run: ./verify.sh --static
+
       - name: Preflight — IR assembles before the slow optimize step
         # llc -O2 over an 80k-case switch takes a minute; catch syntax errors first.
         run: |
