@@ -311,6 +311,51 @@ def main():
         check(after is not None,
               "engine still healthy after the TCP retry attempt")
 
+        # ---------------------------------------------------------------------
+        print("\n### a reply must go only to the client that asked")
+        # The state table is keyed by transaction ID alone. Two queries in flight
+        # with the same 16-bit ID collide, and without question validation one
+        # client receives the other's answer.
+        shared = 0x5A5A
+        sa = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sa.settimeout(6)
+        sa.sendto(header(txid=shared) + qwire("example.com") + struct.pack("!HH", 1, 1),
+                  ("127.0.0.1", port))
+        sb = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sb.settimeout(6)
+        sb.sendto(header(txid=shared) + qwire("example.org") + struct.pack("!HH", 1, 1),
+                  ("127.0.0.1", port))
+        try:
+            ra, _ = sa.recvfrom(65535)
+        except socket.timeout:
+            ra = b""
+        try:
+            rb, _ = sb.recvfrom(65535)
+        except socket.timeout:
+            rb = b""
+        finally:
+            sa.close()
+            sb.close()
+
+        def qname_of(resp):
+            if len(resp) < 13:
+                return b""
+            i, out = 12, b""
+            while i < len(resp) and resp[i] != 0:
+                out += bytes([resp[i]]) + resp[i + 1:i + 1 + resp[i]]
+                i += 1 + resp[i]
+            return out + (b"\x00" if i < len(resp) else b"")
+
+        # The property under test is that no client is handed the other's answer.
+        # Dropping a colliding reply is correct and safe -- the client retries --
+        # so an empty reply is a pass, not a failure.
+        check(qname_of(ra) != qwire("example.org"),
+              "client A is not given client B's answer", f"A saw {qname_of(ra)[:24]!r}")
+        check(qname_of(rb) != qwire("example.com"),
+              "client B is not given client A's answer", f"B saw {qname_of(rb)[:24]!r}")
+        check(qname_of(ra) == qwire("example.com") or qname_of(rb) == qwire("example.org"),
+              "at least one colliding client still receives its own answer")
+
         print("\n### malformed input does not wedge or crash the engine")
         for n in (3, 30, 200, 486):
             udp_query(port, header(txid=0x4321) + bytes([255]) + b"a" * n, timeout=2.0)

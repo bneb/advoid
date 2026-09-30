@@ -58,6 +58,10 @@ declare i32 @fflush(ptr)
 ; arrived over TCP, 0 when it arrived over UDP. Storing fd+1 keeps 0 as a
 ; reliable "no TCP client" sentinel.
 @state_tcp = global [65536 x i64] zeroinitializer
+; Fingerprint of the question each transaction asked. The state table is keyed by
+; transaction ID alone, so two queries sharing an ID collide; comparing the reply's
+; question against this stops one client being handed the other's answer.
+@state_qhash = global [65536 x i64] zeroinitializer
 @tcp_pending = global i64 0
 ; Bound on simultaneously-waiting TCP clients. Each holds an open socket, so an
 ; unbounded table would let a client open connections faster than we answer.
@@ -278,6 +282,9 @@ forward_udp:
     store i64 %ca_v1, ptr %state_ptr
     %sp2 = getelementptr inbounds i64, ptr %state_ptr, i64 1
     store i64 %ca_v2, ptr %sp2
+    %quh = call i64 @hash_qname(ptr @udp_pkt, i64 %bytes)
+    %qst = getelementptr inbounds [65536 x i64], ptr @state_qhash, i64 0, i64 %txid
+    store i64 %quh, ptr %qst
     %fsz = trunc i64 %bytes to i32
     %sent = call i64 @sendto(i32 %up_sock, ptr @udp_pkt, i64 %bytes, i32 0, ptr %up_addr, i32 16)
     %fsent_bad = icmp slt i64 %sent, 0
@@ -391,6 +398,9 @@ forward_tcp_send:
     store i64 0, ptr %taddr
     %taddr2 = getelementptr inbounds i64, ptr %taddr, i64 1
     store i64 0, ptr %taddr2
+    %tqh = call i64 @hash_qname(ptr @tcp_tx, i64 %msglen)
+    %tqhst = getelementptr inbounds [65536 x i64], ptr @state_qhash, i64 0, i64 %ttxid
+    store i64 %tqh, ptr %tqhst
 
     ; A TCP client has no 512-byte limit, so do not let the upstream impose one.
     ; If the query carries no OPT record, add one advertising this engine's own
@@ -466,6 +476,15 @@ reply_up:
     ; Does this transaction belong to a client that connected over TCP?
     %utcp = getelementptr inbounds [65536 x i64], ptr @state_tcp, i64 0, i64 %utxid
     %utcpfd = load i64, ptr %utcp
+    ; Validate the question before relaying. A truncated or colliding reply that
+    ; does not echo the query we sent belongs to a different transaction.
+    %uqst = getelementptr inbounds [65536 x i64], ptr @state_qhash, i64 0, i64 %utxid
+    %want = load i64, ptr %uqst
+    %got_q = call i64 @hash_qname(ptr @udp_pkt, i64 %up_bytes)
+    %mismatch = icmp ne i64 %want, %got_q
+    br i1 %mismatch, label %poll_loop, label %question_ok
+
+question_ok:
     %is_tcp = icmp ne i64 %utcpfd, 0
 
     ; A UDP client's slot holds its sockaddr; a TCP client's is zeroed and the
