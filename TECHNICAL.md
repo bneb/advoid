@@ -76,7 +76,8 @@ The engine begins in `@main`. Its first job: create two UDP sockets — one to l
 ### The Local Socket (lines 23–34)
 
 ```llvm
-%local_sock = call i32 @socket(i32 2, i32 2, i32 17)
+%udp_sock = call i32 @socket(i32 2, i32 2, i32 17)   ; UDP listener
+%tcp_sock = call i32 @socket(i32 2, i32 1, i32 6)    ; TCP listener
 ```
 
 `socket(2, 2, 17)` is `socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)`. The constants are used directly — no `#define` needed when you control the IR. This returns a file descriptor.
@@ -144,20 +145,22 @@ struct pollfd {
 };
 ```
 
-Advoid packs these manually into an `[2 x i64]` array:
+Advoid packs these manually into a `[3 x i64]` array (UDP listener, TCP listener,
+upstream UDP):
 
 ```llvm
-%pollfds = alloca [2 x i64], align 8
+%pollfds = alloca [3 x i64], align 8
 
 ; Entry 0: local socket
-%p0_ptr = getelementptr inbounds [2 x i64], ptr %pollfds, i64 0, i64 0
+%p0_ptr = getelementptr inbounds [3 x i64], ptr %pollfds, i64 0, i64 0
 %p0_fd_64 = zext i32 %local_sock to i64      ; fd in lower 32 bits
 %p0_ev = shl i64 1, 32                        ; POLLIN = 1, shifted to events field
 %p0_val = or i64 %p0_fd_64, %p0_ev           ; combine fd | (POLLIN << 32)
 store i64 %p0_val, ptr %p0_ptr
 
 ; Entry 1: upstream socket (same pattern)
-%p1_ptr = getelementptr inbounds [2 x i64], ptr %pollfds, i64 0, i64 1
+%p1_ptr = getelementptr inbounds [3 x i64], ptr %pollfds, i64 0, i64 1
+%p2_ptr = getelementptr inbounds [3 x i64], ptr %pollfds, i64 0, i64 2   ; upstream
 ; ...
 store i64 %p1_val, ptr %p1_ptr
 ```
@@ -318,7 +321,7 @@ Here's what needs to change in the DNS header and body:
 ```
 Original query packet (28+ bytes):
   [0-1]   TXID         (preserved)
-  [2-3]   Flags        → set to 0x8085 (standard response, NXDOMAIN)
+  [2-3]   Flags        → 0x8180 (QR=1, RD=1, RA=1, RCODE=0 = NOERROR)
   [4-5]   QDCOUNT      (preserved = 1)
   [6-7]   ANCOUNT      → set to 1 (we're adding an answer)
   [8-9]   NSCOUNT      (preserved = 0)
@@ -334,7 +337,8 @@ sinkhole:
     ; Write flags + counts as packed stores
     %f16 = getelementptr inbounds i8, ptr %buf, i64 2
     store i16 32897, ptr %f16, align 2
-    ; 32897 = 0x8085 (big-endian i16)
+    ; 0x8180 = QR|RD|RA, RCODE 0 (NOERROR) -- emitted a byte at a time,
+    ; because DNS fields are big-endian and an i16 store is not
     ; Byte 2: 0x80 (QR=1, OPCODE=0, AA=0, TC=0, RD=1)
     ; Byte 3: 0x85 (RA=0, Z=0, RCODE=5 = refused)
 
@@ -363,14 +367,14 @@ found_q_end:
     ;   0xc00c = compressed name pointer (points back to the question's QNAME)
     ;   0x0001 = TYPE A
     ;   0x0001 = CLASS IN
-    ;   0x0000 = TTL (high bytes, 0)
+    ;   0x00 = TTL high byte
 
     ; Write TTL low bytes, RDLENGTH, and RDATA
     %q_end_8 = add i64 %q_end, 8
     %tail64_2 = getelementptr inbounds i8, ptr %buf, i64 %q_end_8
     store i64 67124224, ptr %tail64_2, align 8
     ; This writes 8 bytes encoding:
-    ;   0x0000 = TTL (remaining, total TTL = 0)
+    ;   0x3C = TTL low byte (total TTL = 60)
     ;   0x0004 = RDLENGTH (4 bytes of RDATA)
     ;   0x0000 = first 2 bytes of 0.0.0.0
     ;   0x0000 = last 2 bytes of 0.0.0.0
@@ -476,7 +480,7 @@ Putting it all together, here's the path a DNS query takes through the engine:
        ├── blocked ──────────────────────────────────────┐
        │                                                  │
        │   6a. Mutate %buf in-place:                      │
-       │       - Store i16 0x8085 at offset 2 (flags)     │
+       │       - Store 0x81,0x80 at offsets 2,3 (flags)   │
        │       - Store i32 0x00000100 at offset 6 (counts)│
        │       - Store i16 0x0000 at offset 10 (ARCOUNT)  │
        │       - Find end of question section             │
@@ -509,6 +513,6 @@ No heap allocations. No dynamic dispatch. No runtime type information. Just sysc
 
 ## What You End Up With
 
-~550 lines of IR, compiled down to a binary that's a few hundred kilobytes. At runtime: ~1 MB of memory (mostly the `state_addrs` table for tracking DNS transaction IDs). Zero allocations per query. Blocked responses go out in the time it takes to hash a domain name and execute a computed branch.
+~1,300 lines of IR, compiled down to a ~2.7 MB binary that embeds the blocklist. At runtime: ~1 MB of memory (mostly the `state_addrs` table for tracking DNS transaction IDs). Zero allocations per query. Blocked responses go out in the time it takes to hash a domain name and execute a computed branch.
 
 It's not the most featureful DNS adblocker, or the most portable, or the easiest to modify. But every instruction that executes is something you can point to and explain. For a tool that sees every DNS query your machine makes, I find that reassuring.

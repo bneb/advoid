@@ -46,7 +46,7 @@ For a line-by-line walkthrough of the LLVM IR packet engine — including socket
 | **Setup** | Menu bar app | Raspberry Pi / Docker | Docker / binary | Browser install | Change DNS setting |
 | **Memory** | See BENCHMARKS.md | ~100 MB | ~50 MB | Varies | N/A (cloud) |
 | **Blocklist** | Compiled at build time | SQLite, auto-updating | Filter lists, auto-updating | Extension-managed | Cloud-managed |
-| **Local-only** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ❌ Third party sees all DNS |
+| **Local-only** | ⚠️ Blocked domains only | ❌ | ❌ | ❌ | ❌ Third party sees all DNS |
 | **Dashboard** | Menu bar toggle | Web UI | Web UI | Extension popup | Web dashboard |
 | **Blocked latency** | Microseconds (in-place mutation) | Milliseconds (hash table lookup) | Milliseconds (filter traversal) | Milliseconds (JS interceptor) | Milliseconds (WAN RTT) |
 | **Code size** | ~1,800 lines | ~50k+ lines | ~100k+ lines | Varies | Closed source |
@@ -121,7 +121,7 @@ sudo mkdir -p /usr/local/etc/advoid
 sudo cp blocklist.local.hashes /usr/local/etc/advoid/local.hashes
 ```
 
-Then restart the daemon from the menu bar (Disable → Enable).
+The engine only reads that file at startup, so it must be restarted to pick up changes. The menu bar's Disable → Enable only toggles system DNS and does **not** restart the daemon; run `sudo launchctl kickstart -k system/com.advoid.daemon` instead.
 
 ## State Constraints
 Advoid strictly manages its lifecycle to prevent routing DNS to a dead port:

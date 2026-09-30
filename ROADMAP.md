@@ -109,7 +109,7 @@ in most cases by anything on the LAN that can reach the port.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
-| **S1.1** | `[~]` | blocker | **Non-blocking TCP handling.** See details below |
+| **S1.1** | `[!]` | blocker | **Non-blocking TCP handling.** See details below |
 | S1.2 | `[ ]` | high | `@tcp_pending` leaks — reclaim abandoned relays with a deadline and close the fd |
 | S1.3 | `[ ]` | medium | `poll()` result and error flags ignored — check `POLLERR`/`POLLHUP`/`POLLNVAL`, handle `poll() == -1` |
 | S1.4 | `[ ]` | medium | `state_addrs` entries are never expired — add a timestamp and reclaim |
@@ -147,6 +147,18 @@ in most cases by anything on the LAN that can reach the port.
   *severity* — it is a local DoS, not remote — but not the *correctness* of the
   fix, and it does not make the blocking loop acceptable: one stuck process on
   the same machine still takes DNS down for every application.
+- **BLOCKED (round 23) — four attempts, none landed.** Per this roadmap's own
+  two-strikes rule this is now `[!]` rather than retried a fifth time. The
+  blocking condition is concrete: **there is no reliable way to validate the
+  design before porting it.** The verification method that found S2.2 (replicate the
+  engine's exact syscall sequence in C, run it outside the engine) failed three
+  times in round 22 on the harness itself -- a wrong loopback constant, a corrupted
+  socket call from my own `sed`, and undiagnosed output buffering. Porting
+  unvalidated IR is what produced the pollfd regression, so repeating that is worse
+  than stopping. **To unblock:** finish `tools/design/s11_wait_loop_model.c` until it
+  produces clean output against all four hostile scenarios, then port that file.
+  **To unblock faster:** run the hostile scenarios against the C model first and
+  only touch `advoid.ll` once the model passes.
 - **Attempted twice; both reverted. What is now known:**
   1. Round 6 built the cooperative-yield loop to `llvm-as` clean, then reported
      "bind failed". **That conclusion was wrong.** A leaked test engine was still
@@ -317,10 +329,10 @@ sprint is what makes it something a stranger can install safely.
 | S4.5 | `[ ]` | medium | **State honesty** — the icon reflects DNS settings, not engine health; no watchdog, no auto-recovery; health probe uses an *allowed* domain so it fails offline and blocks enabling |
 | S4.6 | `[ ]` | medium | **Exact-QNAME matching only** — 31% of entries are apex domains that never cover subdomains. Either add optional suffix matching or document it plainly |
 | S4.7 | `[ ]` | medium | **False positives** — ship a compatibility allowlist for dual-use hosts (fraud/bot defence, consent platforms, affiliate redirectors). Agents listed specific offenders in review |
-| S4.8 | `[ ]` | medium | **Privacy claims are false** — every allowed query goes to Cloudflare. Rewrite "Local-only ✅" and "stays local" |
+| S4.8 | `[x]` | medium | **Privacy claims were false — corrected (round 23).** Every allowed query goes to Cloudflare. Rewrite "Local-only ✅" and "stays local" |
 | S4.9 | `[ ]` | low | **Encrypted DNS bypass** is undocumented — DoH/DoT apps never touch `127.0.0.1:53` |
-| S4.10 | `[ ]` | low | Document the 1024-entry custom-blocklist cap; `README.md:124` tells users to restart via the menu, which cannot do it |
-| S4.11 | `[ ]` | low | `TECHNICAL.md` documents a different engine (512-byte stack buffer, 2 sockets, NXDOMAIN/TTL 0). It is sold as a line-by-line walkthrough |
+| S4.10 | `[x]` | low | Document the 1024-entry custom-blocklist cap; `README.md:124` tells users to restart via the menu, which cannot do it |
+| S4.11 | `[x]` | low | **`TECHNICAL.md` documented a different engine — corrected (round 23).** It described a 512-byte stack buffer, two sockets, a `[2 x i64]` pollfd array, NXDOMAIN with TTL 0, and "~550 lines". The engine is a 4096-byte global buffer, three sockets, `[3 x i64]`, NOERROR with TTL 60, ~1,300 lines. All corrected |
 
 ---
 
