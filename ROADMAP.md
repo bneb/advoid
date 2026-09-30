@@ -140,7 +140,36 @@ in most cases by anything on the LAN that can reach the port.
   `verify.sh`, so the oracle is red until this lands. Design note: the two SIGPIPE
   and loopback-bind checks in the same file already pass, so the suite is not
   simply failing wholesale.
-- **Not started:** the implementation. It needs the poll loop to stop servicing a
+- **Blast radius, measured:** with the loopback-bind fix in place the engine
+  answers `127.0.0.1:5333` but is unreachable on the LAN address (UDP gets no
+  answer, TCP is refused). This defect is therefore reachable only by a local
+  unprivileged process, not by anything on the network. That downgrades the
+  *severity* — it is a local DoS, not remote — but not the *correctness* of the
+  fix, and it does not make the blocking loop acceptable: one stuck process on
+  the same machine still takes DNS down for every application.
+- **Not started:** the implementation. Concrete design, checked against the code:
+  1. Add `@tcp_pool` (`[16 x 4096 x i8]`) plus per-slot arrays `@tcp_fd`,
+     `@tcp_need`, `@tcp_got`, `@tcp_dl`, `@tcp_len`, `@tcp_state`. 16 slots is the
+     existing `@tcp_pending` cap.
+  2. `accept()` becomes: take a free slot, set the socket non-blocking, record
+     `need = 2`, `got = 0`, `deadline = now + 5`, then **return to the poll loop**.
+     It must not touch `@tcp_tx`, which is currently the single connection buffer.
+  3. Give the main `poll()` a bounded timeout (e.g. 100 ms) instead of `-1`, so
+     parked connections are serviced without building a dynamic pollfd array. A
+     10 Hz wakeup is irrelevant next to a 4096-byte buffer and a 12 ns lookup.
+  4. Each iteration, for every live slot: `recv()` non-blocking into
+     `@tcp_pool[slot]`. When `got >= 2` and the length is known, set
+     `need = 2 + len`. When `got == need`, copy the slot into `@tcp_tx`, set
+     `%conn` to the parked fd, and fall into the existing
+     classify/sinkhole/forward code unchanged.
+  5. When `now > deadline`, close the fd and free the slot.
+  6. Replace the per-recv `SO_RCVTIMEO` reliance with the absolute `deadline`;
+     `SO_RCVTIMEO` alone is what a trickling peer defeats today.
+- **Rejected shortcuts, and why:** a single bounded blocking read would fix the
+  idle-declaration case but still delay UDP for the whole wait, failing criteria
+  1 and 3. Forking per connection does not compose with the current design, where
+  the child would have to park an fd in `@state_tcp` that only the parent can
+  later read. It needs the poll loop to stop servicing a
   connection to completion — accept, then return to `poll()` with the connection
   tracked (bytes wanted, bytes received, absolute deadline) until the frame
   completes. A single bounded blocking read would fix the "declares 65534 and
