@@ -255,6 +255,19 @@ security issue: a local process can inject DNS answers today.
 
 ### S2.2 — Upstream replies unvalidated
 
+> **Round 14: the anycast explanation is disproven.** Five queries sent straight to
+> `1.1.1.1:53` all came back from `1.1.1.1:53` — one distinct source — so a
+> connected socket *should* accept them. Re-applying `connect()` to a clean tree
+> reproduced the same four failures, ruling out a port conflict and a transient.
+> The engine binds the upstream socket to `1.1.1.1:53` and then does not act on
+> replies that provably originate there. Root cause still unidentified; it needs
+> packet capture (`sudo tcpdump -i lo0 -n udp and port 53`), not another
+> hypothesis. A regression test exists and is proven red
+> (`the upstream socket must be connected to its resolver`, reporting
+> `seen ['*:*']`); it is tracked as EXPECTED-FAIL against this item.
+
+### S2.2 — Upstream replies unvalidated
+
 - **Area:** engine · **Status:** `[ ]`
 - **Problem:** the upstream UDP socket is unconnected, so a datagram from **any**
   source is accepted if its transaction ID matches a pending entry. Verified: a
