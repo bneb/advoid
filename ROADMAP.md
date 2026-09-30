@@ -21,6 +21,22 @@ is the *behaviour*. Read both before starting a loop.
 - **Add new work** to [Backlog](#backlog) using the template. Do not renumber
   existing IDs — other notes reference them.
 
+### The oracle gates everything
+
+Every item requires `./verify.sh` green to be marked done. Two facts about the
+current oracle, both measured:
+
+- **It is not deterministic.** Three consecutive runs gave 1 green / 2 red, always
+  on the same check (`the TCP retry resolves the truncated query`, which is
+  S2.3). Until that is settled, "green" is a coin flip and no item can be
+  honestly marked done.
+- **S2.3 is therefore the gating item**, not a Sprint 2 nicety. Until it lands,
+  S0.2 ("CI green") cannot pass and the Definition of Done is unusable.
+
+This is deliberately left loud. Muting the check would make the suite green and
+the loop would start marking work done against an oracle that cannot tell
+green from red.
+
 ### Verification
 
 ```bash
@@ -127,7 +143,7 @@ security issue: a local process can inject DNS answers today.
 |---|---|---|---|
 | **S2.1** | `[ ]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
 | **S2.2** | `[ ]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
-| S2.3 | `[ ]` | medium | Answers larger than 4096 bytes — the one remaining suite failure |
+| **S2.3** | `[ ]` | **blocker** | **GATING.** Answers larger than 4096 bytes — the only remaining suite failure, and the only thing keeping the oracle red |
 | S2.4 | `[ ]` | low | Use a resolver-owned randomised upstream txid and map back to the client's |
 
 ### S2.1 — State table keyed on transaction ID alone
@@ -249,7 +265,9 @@ the right sprint when you pick it up.
 
 ### Open items
 
-_(none yet — add below)_
+| ID | Status | Sev | Item |
+|---|---|---|---|
+| B1 | `[ ]` | high | **Oracle determinism.** `the TCP retry resolves the truncated query` flips between pass and fail across identical runs. Until the cause is known, `verify.sh` cannot gate a Definition of Done. Likely related to S2.1 (txid-keyed state table) — the same misdelivery that S2.1 describes would also explain a TCP retry sometimes receiving the upstream's 21-byte truncated answer and sometimes the full one. Investigate alongside S2.1. |
 
 ---
 
