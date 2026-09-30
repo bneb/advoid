@@ -143,7 +143,7 @@ security issue: a local process can inject DNS answers today.
 |---|---|---|---|
 | **S2.1** | `[ ]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
 | **S2.2** | `[ ]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
-| **S2.3** | `[ ]` | **blocker** | **GATING.** Answers larger than 4096 bytes — the only remaining suite failure, and the only thing keeping the oracle red |
+| **S2.3** | `[~]` | **blocker** | **GATING.** Answers larger than 4096 bytes — the only remaining suite failure, and the only thing keeping the oracle red. **Notes:** a TCP client has no 512-byte limit, so the fix adopted was to have the engine add an OPT record advertising its own 4096-byte buffer when forwarding a TCP client's query that has none, so upstream returns the full answer in one datagram. Verified that upstream *does* honour this: a hand-built query with OPT(4096) returns 1028B with TC=0, so the wire format and the premise are right. **Not working:** the engine still returns 21B/TC=1, so the record is not reaching upstream. The branch (`forward_tcp_send_edns`) and the ARCOUNT==0 guard are in place and the IR assembles, but the append has not been shown to take effect and the cause is unknown. Candidates: the append writes outside the intended range, or ARCOUNT is not actually zero at that point. **Not verified beyond "no regression"** — verify.sh is unchanged at 31/32. Do not treat this as done. Next: instrument the sendto length to confirm whether %msglen+11 is going out. |
 | S2.4 | `[ ]` | low | Use a resolver-owned randomised upstream txid and map back to the client's |
 
 ### S2.1 — State table keyed on transaction ID alone

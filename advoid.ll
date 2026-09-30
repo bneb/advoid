@@ -390,6 +390,35 @@ forward_tcp_send:
     %taddr2 = getelementptr inbounds i64, ptr %taddr, i64 1
     store i64 0, ptr %taddr2
 
+    ; A TCP client has no 512-byte limit, so do not let the upstream impose one.
+    ; If the query carries no OPT record, add one advertising this engine's own
+    ; 4096-byte buffer; otherwise a large answer comes back truncated and the
+    ; client's RFC 1035 4.2.1 TCP retry never actually resolves anything.
+    %arc10 = getelementptr inbounds i8, ptr @tcp_tx, i64 10
+    %arc_hi = load i8, ptr %arc10
+    %arc11 = getelementptr inbounds i8, ptr @tcp_tx, i64 11
+    %arc_lo = load i8, ptr %arc11
+    %arc_any = or i8 %arc_hi, %arc_lo
+    %has_opt = icmp ne i8 %arc_any, 0
+    br i1 %has_opt, label %forward_tcp_send_plain, label %forward_tcp_send_edns
+
+forward_tcp_send_edns:
+    ; 11-byte OPT RR at the end of the query:
+    ;   NAME   root            00
+    ;   TYPE   OPT (41)        00 29
+    ;   CLASS  our bufsize     10 00   (4096, big-endian)
+    ;   TTL    0               00 00 00 00
+    ;   RDLEN  0               00 00
+    call void @append_opt_record(ptr @tcp_tx, i64 %msglen)
+    ; ARCOUNT = 1
+    store i8 0, ptr %arc10
+    store i8 1, ptr %arc11
+    %elen = add i64 %msglen, 11
+    %esent = call i64 @sendto(i32 %up_sock, ptr @tcp_tx, i64 %elen, i32 0, ptr %up_addr, i32 16)
+    %ebad = icmp slt i64 %esent, 0
+    br i1 %ebad, label %forward_tcp_abandon, label %forward_tcp_count
+
+forward_tcp_send_plain:
     %tsent = call i64 @sendto(i32 %up_sock, ptr @tcp_tx, i64 %msglen, i32 0, ptr %up_addr, i32 16)
     %tsent_bad = icmp slt i64 %tsent, 0
     br i1 %tsent_bad, label %forward_tcp_abandon, label %forward_tcp_count
@@ -771,6 +800,37 @@ entry:
 ; section (NODATA) rather than a bogus A record — replying with a type the client
 ; never asked for violates RFC 3596/9460 and confuses resolvers.
 ; ---------------------------------------------------------------------------
+; append_opt_record writes an 11-byte OPT RR advertising a 4096-byte buffer
+; immediately after the message at %buf. Wire form:
+;   NAME root (00) | TYPE OPT (00 29) | CLASS 4096 (10 00) | TTL 0 | RDLEN 0
+; Offsets advance one byte at a time so no index arithmetic is involved.
+define void @append_opt_record(ptr %buf, i64 %len) {
+entry:
+    %b0 = getelementptr inbounds i8, ptr %buf, i64 %len
+    %b1 = getelementptr inbounds i8, ptr %b0, i64 1
+    store i8 0, ptr %b1
+    %b2 = getelementptr inbounds i8, ptr %b1, i64 1
+    store i8 0, ptr %b2
+    %b3 = getelementptr inbounds i8, ptr %b2, i64 1
+    store i8 41, ptr %b3
+    %b4 = getelementptr inbounds i8, ptr %b3, i64 1
+    store i8 16, ptr %b4
+    %b5 = getelementptr inbounds i8, ptr %b4, i64 1
+    store i8 0, ptr %b5
+    %b6 = getelementptr inbounds i8, ptr %b5, i64 1
+    store i8 0, ptr %b6
+    %b7 = getelementptr inbounds i8, ptr %b6, i64 1
+    store i8 0, ptr %b7
+    %b8 = getelementptr inbounds i8, ptr %b7, i64 1
+    store i8 0, ptr %b8
+    %b9 = getelementptr inbounds i8, ptr %b8, i64 1
+    store i8 0, ptr %b9
+    %b10 = getelementptr inbounds i8, ptr %b9, i64 1
+    store i8 0, ptr %b10
+    %b11 = getelementptr inbounds i8, ptr %b10, i64 1
+    store i8 0, ptr %b11
+    ret void
+}
 define i64 @sinkhole(ptr %buf, i64 %len) {
 entry:
     ; FLAGS = 0x8180: QR=1, RD=1, RA=1, RCODE=0. The two flag bytes are written
