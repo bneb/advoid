@@ -73,10 +73,10 @@ the pre-TCP engine.
 
 | ID | Status | Item |
 |---|---|---|
-| S0.1 | `[ ]` | Commit the whole tree (engine, UI, compiler, tests, docs, `verify.sh`, `reinstall-assets.sh`). No tags yet. **Verify:** `git status --short` empty |
+| S0.1 | `[x]` | Commit the whole tree (engine, UI, compiler, tests, docs, `verify.sh`, `reinstall-assets.sh`). No tags yet. **Verify:** `git status --short` empty |
 | S0.2 | `[ ]` | Confirm `ci.yml` runs green on the pushed tree — especially the behaviour suite on port 5333. **Verify:** CI badge, or `ADVOID_TEST_PORT=5333 python3 tests/engine_test.py` |
-| S0.3 | `[ ]` | Add a regression test for **TCP relay as the first query of a fresh engine**. The old suite only exercised TCP after UDP traffic, which is exactly why the `set_io_timeout` GEP bug survived weeks of "passing" runs. **Verify:** run it against a build with the GEP bug reverted; it must fail |
-| S0.4 | `[ ]` | `.gitignore` must exclude `final.ll`, `final.o`, `Advoid.app/`, `blocklist.ll`. **Verify:** `git ls-files` shows none of them |
+| S0.3 | `[~]` | Add a regression test for **TCP relay as the first query of a fresh engine**. The old suite only exercised TCP after UDP traffic, which is exactly why the `set_io_timeout` GEP bug survived weeks of "passing" runs. **Verify:** run it against a build with the GEP bug reverted; it must fail |
+| S0.4 | `[x]` | `.gitignore` must exclude `final.ll`, `final.o`, `Advoid.app/`, `blocklist.ll`. **Verify:** `git ls-files` shows none of them |
 
 ---
 
