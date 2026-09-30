@@ -29,6 +29,7 @@ OWNED_BY_OPEN_ITEM = {
     "UDP query answered while a TCP client declares 65534 bytes": "S1.1",
     "and answered promptly, not after a long stall": "S1.1",
     "UDP unaffected with four stalled TCP clients": "S1.1",
+    "upstream UDP socket is connected to 1.1.1.1:53": "S2.2",
 }
 OPEN_ITEM = set(OWNED_BY_OPEN_ITEM.values())
 
