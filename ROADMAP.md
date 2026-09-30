@@ -75,7 +75,7 @@ the pre-TCP engine.
 |---|---|---|
 | S0.1 | `[x]` | Commit the whole tree (engine, UI, compiler, tests, docs, `verify.sh`, `reinstall-assets.sh`). No tags yet. **Verify:** `git status --short` empty |
 | S0.2 | `[ ]` | Confirm `ci.yml` runs green on the pushed tree — especially the behaviour suite on port 5333. **Verify:** CI badge, or `ADVOID_TEST_PORT=5333 python3 tests/engine_test.py` |
-| S0.3 | `[~]` | Add a regression test for **TCP relay as the first query of a fresh engine**. The old suite only exercised TCP after UDP traffic, which is exactly why the `set_io_timeout` GEP bug survived weeks of "passing" runs. **Verify:** run it against a build with the GEP bug reverted; it must fail |
+| S0.3 | `[~]` | **Guard the IR-level bug class structurally.** The behavioural test for this was tried and **does not work**: rebuilt with the `set_io_timeout` GEP bug reintroduced, the suite still reported "TCP relay answers on a fresh engine -- 61 bytes". The bug corrupts a slot 128 bytes up, so it only misbehaves when that slot is live; the failure is layout- and traffic-dependent and cannot be caught black-box. Replace it with a static lint over `advoid.ll` for (a) `getelementptr` indexing an array type with one index, which addresses `k*sizeof(T)` instead of byte `k`, and (b) multi-byte `store i16/i32` of a literal into a DNS field, which emits little-endian. **Verify:** lint fails on a copy with each bug reintroduced |
 | S0.4 | `[x]` | `.gitignore` must exclude `final.ll`, `final.o`, `Advoid.app/`, `blocklist.ll`. **Verify:** `git ls-files` shows none of them |
 
 ---
