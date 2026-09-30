@@ -807,9 +807,8 @@ entry:
 define void @append_opt_record(ptr %buf, i64 %len) {
 entry:
     %b0 = getelementptr inbounds i8, ptr %buf, i64 %len
-    %b1 = getelementptr inbounds i8, ptr %b0, i64 1
-    store i8 0, ptr %b1
-    %b2 = getelementptr inbounds i8, ptr %b1, i64 1
+    store i8 0, ptr %b0
+    %b2 = getelementptr inbounds i8, ptr %b0, i64 1
     store i8 0, ptr %b2
     %b3 = getelementptr inbounds i8, ptr %b2, i64 1
     store i8 41, ptr %b3

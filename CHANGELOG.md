@@ -152,6 +152,13 @@ system before and after the fix.
   created root-owned with explicit modes instead of relying on `sudo cp`.
 
 ### Fixed
+- Answers larger than 4096 bytes were unreachable. When forwarding a query that
+  arrived over TCP, the engine let the upstream impose the 512-byte UDP limit, so
+  the client's RFC 1035 4.2.1 TCP retry returned the same truncated answer it had
+  just been told to fetch again. The engine now appends an OPT record advertising
+  its own 4096-byte buffer when forwarding a TCP query that carries none, and the
+  upstream returns the complete answer in one datagram. Verified against Cloudflare:
+  a query with `OPT(4096)` returns 1028 bytes with TC clear.
 - The menu bar app reported "Advoid engine is not running" on a perfectly healthy
   install. The health check read a status file inside a root-owned `0700`
   directory, which the unprivileged app cannot open, so it always concluded the

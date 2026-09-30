@@ -26,12 +26,12 @@ is the *behaviour*. Read both before starting a loop.
 Every item requires `./verify.sh` green to be marked done. Two facts about the
 current oracle, both measured:
 
-- **It is not deterministic.** Three consecutive runs gave 1 green / 2 red, always
-  on the same check (`the TCP retry resolves the truncated query`, which is
-  S2.3). Until that is settled, "green" is a coin flip and no item can be
-  honestly marked done.
-- **S2.3 is therefore the gating item**, not a Sprint 2 nicety. Until it lands,
-  S0.2 ("CI green") cannot pass and the Definition of Done is unusable.
+- **It was not deterministic** until S2.3 landed: three consecutive runs gave
+  1 green / 2 red, always on the same check. That made "green" a coin flip and
+  the Definition of Done unusable for every item.
+- **It is now deterministic** — 4/4 consecutive green after the S2.3 fix. Re-check
+  this if the oracle starts flipping; a flaky oracle silently unblocks work that
+  should not have been certified.
 
 This is deliberately left loud. Muting the check would make the suite green and
 the loop would start marking work done against an oracle that cannot tell
@@ -143,7 +143,7 @@ security issue: a local process can inject DNS answers today.
 |---|---|---|---|
 | **S2.1** | `[ ]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
 | **S2.2** | `[ ]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
-| **S2.3** | `[~]` | **blocker** | **GATING.** Answers larger than 4096 bytes — the only remaining suite failure, and the only thing keeping the oracle red. **Notes:** a TCP client has no 512-byte limit, so the fix adopted was to have the engine add an OPT record advertising its own 4096-byte buffer when forwarding a TCP client's query that has none, so upstream returns the full answer in one datagram. Verified that upstream *does* honour this: a hand-built query with OPT(4096) returns 1028B with TC=0, so the wire format and the premise are right. **Not working:** the engine still returns 21B/TC=1, so the record is not reaching upstream. The branch (`forward_tcp_send_edns`) and the ARCOUNT==0 guard are in place and the IR assembles, but the append has not been shown to take effect and the cause is unknown. Candidates: the append writes outside the intended range, or ARCOUNT is not actually zero at that point. **Not verified beyond "no regression"** — verify.sh is unchanged at 31/32. Do not treat this as done. Next: instrument the sendto length to confirm whether %msglen+11 is going out. |
+| **S2.3** | `[x]` | **blocker** | **GATING — done.** A TCP client has no 512-byte limit, so when forwarding such a query the engine now appends an OPT record advertising its own 4096-byte buffer; upstream then returns the full answer in one datagram instead of truncating, and the client's RFC 1035 4.2.1 TCP retry finally resolves. Confirmed upstream honours this (a hand-built `OPT(4096)` query returns 1028B, TC=0). The first attempt did not work because the 11 OPT bytes were written to `len+1 .. len+11` — the first byte was computed but never stored, so the record started one byte late and left byte `len` holding stale buffer content. **Verified:** `verify.sh` green, 4/4 consecutive runs, suite 32/32. **Still open:** answers above 4096 bytes still need a genuine TCP upstream fetch; this change raises the ceiling, it does not remove it (tracked in the Backlog) |
 | S2.4 | `[ ]` | low | Use a resolver-owned randomised upstream txid and map back to the client's |
 
 ### S2.1 — State table keyed on transaction ID alone
