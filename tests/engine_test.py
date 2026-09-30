@@ -312,6 +312,39 @@ def main():
               "engine still healthy after the TCP retry attempt")
 
         # ---------------------------------------------------------------------
+        print("\n### malformed query headers are rejected, not answered")
+        def raw(pkt, timeout=2.0):
+            sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sk.settimeout(timeout)
+            try:
+                sk.sendto(pkt, ("127.0.0.1", port))
+                return sk.recvfrom(65535)[0]
+            except socket.timeout:
+                return None
+            finally:
+                sk.close()
+
+        qn = qwire("doubleclick.net")
+        tail = struct.pack("!HH", 1, 1)
+
+        # QR=1: this is a response, not a query. Answering it invites loops.
+        r = raw(header(txid=0x0101, flags=0x8180) + qn + tail)
+        check(r is None, "a QR=1 packet is not answered",
+              f"got {len(r)}B" if r else "")
+
+        # QDCOUNT=0: no question to answer.
+        r = raw(struct.pack("!HHHHHH", 0x0102, 0x0100, 0, 0, 0, 0) + qn + tail)
+        check(r is None or struct.unpack("!H", r[2:4])[0] & 0xF == 1,
+              "QDCOUNT=0 is refused with FORMERR or dropped",
+              f"rcode={struct.unpack('!H', r[2:4])[0] & 0xF}" if r else "dropped")
+
+        # opcode 5 is UPDATE; a recursive resolver must answer NOTIMP (rcode 4).
+        r = raw(header(txid=0x0103, flags=0x2800) + qn + tail)
+        ok = r is None or (struct.unpack("!H", r[2:4])[0] & 0xF) == 4
+        check(ok, "a non-QUERY opcode is refused with NOTIMP or dropped",
+              f"rcode={struct.unpack('!H', r[2:4])[0] & 0xF}" if r else "dropped")
+
+        # ---------------------------------------------------------------------
         print("\n### a reply must go only to the client that asked")
         # The state table is keyed by transaction ID alone. Two queries in flight
         # with the same 16-bit ID collide, and without question validation one
