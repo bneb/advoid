@@ -30,6 +30,7 @@ run()  { local name="$1"; shift; if "$@" >"$WORK/log" 2>&1; then ok "$name"; els
 static() {
   echo "── static ──────────────────────────────────────────────"
   run "advoid.ll assembles"        llvm-as advoid.ll -o /dev/null
+  run "ir-lint (byte order, GEP)"   python3 tools/ir_lint.py advoid.ll
   run "go vet"                     go vet ./...
   run "go tests"                   go test ./...
   run "swift typecheck"            swiftc -typecheck -module-cache-path "$WORK/mc" advoid-menu.swift
