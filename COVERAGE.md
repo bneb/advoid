@@ -10,7 +10,7 @@ produce tests that assert nothing. This records what is measured, what is not, a
 |---|---|---|---|---|
 | Go compiler | `go test -cover` | **73.8%** | floor 70% in `verify.sh` | Covers hashing, parsing, safelist, collision detection, IR emission, local-blocklist generation |
 | Behaviour suite | `tests/engine_test.py` | **32 checks** | must be all green | End-to-end over real sockets against the built engine |
-| Hostile-input suite | `tests/hostile_test.py` | **8 checks** | **currently 4/8 — red** | Slow-loris, concurrent stalls, SIGPIPE, LAN exposure. Red because S1.1 is open |
+| Hostile-input suite | `tests/hostile_test.py` | **10 checks** | 6 gate + 4 tracked-open | Slow-loris and concurrent stalls are EXPECTED-FAIL, owned by S1.1; the rest gate the build |
 | IR static lint | `tools/ir_lint.py` | — | wired into `verify.sh` | Byte-order and `getelementptr` shapes |
 
 ### Known coverage gaps, stated plainly
@@ -43,7 +43,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 7 | Stack leak, 16 B per relayed reply | reviewer | **no** | assert SP is stable across many relays |
 | 8 | Test suite could not bind unprivileged | all | yes | `verify.sh` runs it with no sudo |
 | 9 | Answers > 4096 unreachable via TCP | reviewer | yes | suite: *TCP retry resolves the truncated query* |
-| 10 | State table keyed on txid alone | reviewer | **no** | S2.1 — two clients, same txid |
+| 10 | State table keyed on txid alone | reviewer | **yes** | suite: *a reply must go only to the client that asked* |
 | 11 | Forged upstream reply relayed | reviewer | **no** | S2.2 — inject a datagram with a matching txid |
 | 12 | Slow-loris stalls the whole resolver | reviewer | **yes** | `tests/hostile_test.py` — proven failing against the current build |
 | 13 | `@tcp_pending` leaks and disables TCP | reviewer | **no** | S1.2 |

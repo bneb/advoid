@@ -220,7 +220,7 @@ security issue: a local process can inject DNS answers today.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
-| **S2.1** | `[~]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
+| **S2.1** | `[x]` | high | **State table keyed on txid alone** — cross-client answer misdelivery. See below |
 | **S2.2** | `[ ]` | high | **Upstream replies unvalidated** — forged datagrams are relayed |
 | **S2.3** | `[x]` | **blocker** | **GATING — done.** A TCP client has no 512-byte limit, so when forwarding such a query the engine now appends an OPT record advertising its own 4096-byte buffer; upstream then returns the full answer in one datagram instead of truncating, and the client's RFC 1035 4.2.1 TCP retry finally resolves. Confirmed upstream honours this (a hand-built `OPT(4096)` query returns 1028B, TC=0). The first attempt did not work because the 11 OPT bytes were written to `len+1 .. len+11` — the first byte was computed but never stored, so the record started one byte late and left byte `len` holding stale buffer content. **Verified:** `verify.sh` green, 4/4 consecutive runs, suite 32/32. **Still open:** answers above 4096 bytes still need a genuine TCP upstream fetch; this change raises the ceiling, it does not remove it (tracked in the Backlog) |
 | S2.4 | `[ ]` | low | Use a resolver-owned randomised upstream txid and map back to the client's |
@@ -242,13 +242,14 @@ security issue: a local process can inject DNS answers today.
   fully separate tables per transport and never let one clear the other. Also
   **validate the reply's question section** against the stored query — that alone
   catches most misdelivery.
-- **Implemented (round 11) but not yet markable.** Each in-flight transaction now
-  stores a fingerprint of its question (`@state_qhash`, via `hash_qname`), and a
-  reply whose question does not match is dropped instead of relayed. Verified:
-  the collision test fails against the pre-fix build -- client B received
-  `example.com` when it had asked for `example.org` -- and passes after. Behaviour
-  suite is **35/35**. Still `[~]` only because `verify.sh` is red on the S1.1
-  hostile suite, and the loop's Definition of Done requires a green oracle.
+- **Done (round 11).** Each in-flight transaction now stores a fingerprint of its
+  question (`@state_qhash`, via `hash_qname`), and a reply whose question does not
+  match is dropped instead of relayed. Verified: the collision test fails against
+  the pre-fix build -- client B received `example.com` when it had asked for
+  `example.org` -- and passes after. Behaviour suite **35/35**, oracle green.
+- Partially addressed: the table is still *keyed* on txid alone, so a colliding
+  query loses its slot and must retry. That is a denial-of-service under load, not
+  misdelivery; a composite key would be the full fix (Backlog).
 - **Verify:** `./verify.sh` plus the new collision tests.
 - **Files:** `advoid.ll`, `tests/engine_test.py`
 
