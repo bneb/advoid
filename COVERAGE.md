@@ -36,6 +36,7 @@ means a test fails without the fix — not merely that a test touches the area.
 | 1 | Blocklist bypassed by one uppercase letter | reviewer | yes | suite: *case-insensitive* |
 | 2 | Listeners bound `INADDR_ANY` | reviewer | **no** | assert in suite that a LAN-address query is refused |
 | 3 | Root daemon runs a user-writable binary | reviewer | **no** | assert plist path is root-owned and outside the bundle |
+| 2b | *(severity corrected: S1.1 is local-only after the loopback bind)* | this round | n/a | see ROADMAP S1.1 Notes |
 | 4 | SIGPIPE kills the resolver | reviewer | **no** | TCP query then RST; engine must survive |
 | 5 | `uninstall.sh` skips first network service | reviewer | **no** | run the pipeline, assert both services appear |
 | 6 | `set_io_timeout` GEP writes 128 bytes up | reviewer | yes | suite: *first upstream query of a fresh engine* + lint |
