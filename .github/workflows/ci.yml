@@ -27,6 +27,11 @@ jobs:
       - name: Run blocklist compiler tests
         run: go test ./... -v
 
+      - name: Install PyYAML for workflow validation
+        # verify.sh validates ci.yml/release.yml; the runner's Python has no yaml
+        # module, so this check failed on every push until it was added.
+        run: python3 -m pip install --quiet pyyaml || pip3 install --quiet pyyaml
+
       - name: Static checks and IR lint
         # Same oracle the autonomous loop gates on, so CI and the loop cannot drift.
         run: ./verify.sh --static

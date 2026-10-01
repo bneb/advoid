@@ -68,7 +68,16 @@ static() {
   run "swift typecheck"            swiftc -typecheck -module-cache-path "$WORK/mc" advoid-menu.swift
   run "install.sh syntax"          bash -n install.sh
   run "uninstall.sh syntax"        bash -n uninstall.sh
-  run "reinstall-assets.sh syntax" bash -n reinstall-assets.sh
+  # reinstall-assets.sh is deliberately gitignored (a local install helper), so it
+  # exists only on the machine that wrote it. Syntax-checking it unconditionally
+  # meant this check passed locally and failed in CI on every push -- it asserted
+  # something about a file the project does not ship. Reported explicitly rather
+  # than dropped, so the situation stays visible.
+  if git ls-files --error-unmatch reinstall-assets.sh >/dev/null 2>&1; then
+    run "reinstall-assets.sh syntax" bash -n reinstall-assets.sh
+  else
+    skip "reinstall-assets.sh syntax" "local-only helper, not tracked (see .gitignore)"
+  fi
   run "engine_test.py parses"      python3 -c "import ast;ast.parse(open('tests/engine_test.py').read())"
   run "ci.yml valid"               python3 -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"
   run "release.yml valid"          python3 -c "import yaml;yaml.safe_load(open('.github/workflows/release.yml'))"
