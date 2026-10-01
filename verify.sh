@@ -79,8 +79,18 @@ static() {
     skip "reinstall-assets.sh syntax" "local-only helper, not tracked (see .gitignore)"
   fi
   run "engine_test.py parses"      python3 -c "import ast;ast.parse(open('tests/engine_test.py').read())"
-  run "ci.yml valid"               python3 -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"
-  run "release.yml valid"          python3 -c "import yaml;yaml.safe_load(open('.github/workflows/release.yml'))"
+  # Parse the workflows with Ruby rather than Python: macOS runners ship Ruby with
+  # a real YAML parser, while their Python is externally managed and refuses
+  # `pip install pyyaml`. Fall back to PyYAML only if Ruby is unavailable.
+  yaml_ok() {
+    if command -v ruby >/dev/null 2>&1; then
+      ruby -ryaml -e "YAML.load_file(ARGV[0])" "$1" >/dev/null 2>&1
+    else
+      python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" "$1"
+    fi
+  }
+  run "ci.yml valid"               yaml_ok .github/workflows/ci.yml
+  run "release.yml valid"          yaml_ok .github/workflows/release.yml
   run "no build artifacts tracked"  bash -c '! git ls-files --error-unmatch final.ll final.o Advoid.app 2>/dev/null'
 }
 
