@@ -25,6 +25,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.checkAndInstallDaemon()
             let initialStatus = self.getDNSStatus()
             self.updateIcon(isActive: initialStatus)
+            // A fresh install leaves system DNS untouched, so Advoid is installed
+            // but doing nothing until the user discovers the menu. Offer to activate
+            // once the engine is confirmed healthy -- prompting rather than
+            // silently redirecting every lookup on the machine.
+            if !initialStatus && self.engineHealth() {
+                self.promptToActivate()
+            }
+        }
+    }
+
+    /// promptToActivate asks before changing system DNS. Silently pointing every
+    /// lookup at Advoid would be a surprise the user cannot undo without knowing
+    /// where to look, so this is a dialog with Enable as the default action.
+    func promptToActivate() {
+        let alert = NSAlert()
+        alert.messageText = "Turn on Adblock?"
+        alert.informativeText = """
+        Advoid is installed and its engine is running, but system DNS is not \
+        pointing at it yet. Turning it on routes DNS through Advoid on this Mac. \
+        You can turn it off again from this menu.
+        """
+        alert.addButton(withTitle: "Turn On")
+        alert.addButton(withTitle: "Not Now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            self.enable()
         }
     }
 

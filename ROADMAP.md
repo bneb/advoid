@@ -325,7 +325,7 @@ sprint is what makes it something a stranger can install safely.
 | **S4.1** | `[ ]` | blocker | **Verify the `networksetup` privilege path** — the menu app runs it unprivileged while `install.sh` uses `sudo`. If it fails, Enable silently does nothing. 30-second manual test: run `networksetup -setdnsservers "Wi-Fi" 127.0.0.1` as the user, then `empty` |
 | S4.2 | `[ ]` | high | **Single hardcoded upstream** — no fallback, no config. Breaks entirely on networks that filter 1.1.1.1, including corporate split-horizon DNS. Read upstreams from the plist |
 | S4.3 | `[ ]` | high | **Uninstall leaves DNS pointing at a deleted engine** — `brew uninstall --cask` and trashing the app both do. Restore DNS from `uninstall_postflight`, and add cask `caveats` |
-| S4.4 | `[ ]` | high | **The app never calls `enable()`** despite `README.md:59` claiming it auto-routes DNS |
+| S4.4 | `[x]` | high | **The app never calls `enable()`** despite `README.md:59` claiming it auto-routes DNS |
 | S4.5 | `[ ]` | medium | **State honesty** — the icon reflects DNS settings, not engine health; no watchdog, no auto-recovery; health probe uses an *allowed* domain so it fails offline and blocks enabling |
 | S4.6 | `[ ]` | medium | **Exact-QNAME matching only** — 31% of entries are apex domains that never cover subdomains. Either add optional suffix matching or document it plainly |
 | S4.7 | `[ ]` | medium | **False positives** — ship a compatibility allowlist for dual-use hosts (fraud/bot defence, consent platforms, affiliate redirectors). Agents listed specific offenders in review |
