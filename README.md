@@ -142,6 +142,21 @@ sudo tcpdump -i lo0 -n udp port 53
 Click the menu bar icon to see live statistics:
 
 - **Blocked** — queries sinkholed to `0.0.0.0`
+- **Matching is exact, not suffix-based.** A listed domain blocks only that exact
+  name. `doubleclick.net` in the list does **not** block `ads.doubleclick.net`;
+  that only works if the subdomain is listed separately (most host lists do). The
+  safelist, by contrast, *is* suffix-aware — an allowed domain covers its
+  subdomains. Measured against the engine:
+
+  | Query | Result |
+  |---|---|
+  | `doubleclick.net` | blocked (listed) |
+  | `ad.doubleclick.net` | blocked (listed separately) |
+  | `ads.doubleclick.net` | **not blocked** |
+  | `sub.ad.doubleclick.net` | **not blocked** |
+  | `doubleclick.com` | blocked (listed separately) |
+
+  If you are writing your own blocklist, list subdomains explicitly.
 - **Forwarded** — queries relayed upstream to Cloudflare
 - **Uptime** — how long the daemon has been running
 
