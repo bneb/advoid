@@ -343,7 +343,7 @@ handed to a stranger safely.
 
 | ID | Status | Sev | Item |
 |---|---|---|---|
-| S5.1 | `[ ]` | blocker | **Commit and tag** a release. The cask URL and changelog links currently 404 |
+| S5.1 | `[!]` | blocker | **Tag a release — BLOCKED, needs credentials.** The cask URL and changelog links currently 404 |
 | S5.2 | `[ ]` | high | **Code sign and notarize** app and engine with Developer ID; verify with `codesign --verify --strict` and `spctl -a -vv` in CI **and** before `launchctl bootstrap` |
 | S5.3 | `[ ]` | high | `homebrew/advoid.rb` has `sha256 :no_check` — publish a real checksum |
 | S5.4 | `[ ]` | medium | Pin CI actions by SHA and the LLVM toolchain version; the release job has `contents: write` and floating tags |
